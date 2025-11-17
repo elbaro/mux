@@ -96,6 +96,8 @@ export class StreamingMessageAggregator {
   // Track when we're waiting for stream-start after user message
   // Prevents retry barrier flash during normal send flow
   // Stores timestamp of when user message was sent (null = no pending stream)
+  // IMPORTANT: We intentionally keep this timestamp until a stream actually starts
+  // (or the user retries) so retry UI/backoff logic doesn't misfire on send failures.
   private pendingStreamStartTime: number | null = null;
 
   // Workspace creation timestamp (used for recency calculation)
