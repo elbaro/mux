@@ -27,6 +27,7 @@ import {
 } from "@/common/constants/storage";
 import {
   prepareCompactionMessage,
+  executeCompaction,
   processSlashCommand,
   type SlashCommandContext,
 } from "@/browser/utils/chatCommands";
@@ -478,12 +479,39 @@ export const ChatInput: React.FC<ChatInputProps> = (props) => {
     const isSlashCommand = normalizedCommandInput.startsWith("/");
     const parsed = isSlashCommand ? parseCommand(normalizedCommandInput) : null;
 
+    // Prepare image parts early so slash commands can access them
+    const imageParts = imageAttachments.map((img, index) => {
+      // Validate before sending to help with debugging
+      if (!img.url || typeof img.url !== "string") {
+        console.error(
+          `Image attachment [${index}] has invalid url:`,
+          typeof img.url,
+          img.url?.slice(0, 50)
+        );
+      }
+      if (!img.url?.startsWith("data:")) {
+        console.error(`Image attachment [${index}] url is not a data URL:`, img.url?.slice(0, 100));
+      }
+      if (!img.mediaType || typeof img.mediaType !== "string") {
+        console.error(
+          `Image attachment [${index}] has invalid mediaType:`,
+          typeof img.mediaType,
+          img.mediaType
+        );
+      }
+      return {
+        url: img.url,
+        mediaType: img.mediaType,
+      };
+    });
+
     if (parsed) {
       const context: SlashCommandContext = {
         variant,
         workspaceId: variant === "workspace" ? props.workspaceId : undefined,
         sendMessageOptions,
         setInput,
+        setImageAttachments,
         setIsSending,
         setToast,
         setVimEnabled,
@@ -493,6 +521,7 @@ export const ChatInput: React.FC<ChatInputProps> = (props) => {
         onTruncateHistory: variant === "workspace" ? props.onTruncateHistory : undefined,
         onCancelEdit: variant === "workspace" ? props.onCancelEdit : undefined,
         editMessageId: editingMessage?.id,
+        imageParts: imageParts.length > 0 ? imageParts : undefined,
         resetInputHeight: () => {
           if (inputRef.current) {
             inputRef.current.style.height = "36px";
@@ -540,36 +569,71 @@ export const ChatInput: React.FC<ChatInputProps> = (props) => {
       // Save current state for restoration on error
       const previousImageAttachments = [...imageAttachments];
 
-      try {
-        // Prepare image parts if any
-        const imageParts = imageAttachments.map((img, index) => {
-          // Validate before sending to help with debugging
-          if (!img.url || typeof img.url !== "string") {
-            console.error(
-              `Image attachment [${index}] has invalid url:`,
-              typeof img.url,
-              img.url?.slice(0, 50)
-            );
-          }
-          if (!img.url?.startsWith("data:")) {
-            console.error(
-              `Image attachment [${index}] url is not a data URL:`,
-              img.url?.slice(0, 100)
-            );
-          }
-          if (!img.mediaType || typeof img.mediaType !== "string") {
-            console.error(
-              `Image attachment [${index}] has invalid mediaType:`,
-              typeof img.mediaType,
-              img.mediaType
-            );
-          }
-          return {
-            url: img.url,
-            mediaType: img.mediaType,
-          };
-        });
+      // Auto-compaction check (workspace variant only)
+      // Check if we should auto-compact before sending this message
+      // Result is computed in parent (AIView) and passed down to avoid duplicate calculation
+      const shouldAutoCompact =
+        props.autoCompactionCheck &&
+        props.autoCompactionCheck.usagePercentage >=
+          props.autoCompactionCheck.thresholdPercentage &&
+        !isCompacting; // Skip if already compacting to prevent double-compaction queue
+      if (variant === "workspace" && !editingMessage && shouldAutoCompact) {
+        // Clear input immediately for responsive UX
+        setInput("");
+        setImageAttachments([]);
+        setIsSending(true);
 
+        try {
+          const result = await executeCompaction({
+            workspaceId: props.workspaceId,
+            continueMessage: {
+              text: messageText,
+              imageParts,
+              model: sendMessageOptions.model,
+            },
+            sendMessageOptions,
+          });
+
+          if (!result.success) {
+            // Restore on error
+            setInput(messageText);
+            setImageAttachments(previousImageAttachments);
+            setToast({
+              id: Date.now().toString(),
+              type: "error",
+              title: "Auto-Compaction Failed",
+              message: result.error ?? "Failed to start auto-compaction",
+            });
+          } else {
+            setToast({
+              id: Date.now().toString(),
+              type: "success",
+              message: `Context threshold reached - auto-compacting...`,
+            });
+            props.onMessageSent?.();
+          }
+        } catch (error) {
+          // Restore on unexpected error
+          setInput(messageText);
+          setImageAttachments(previousImageAttachments);
+          setToast({
+            id: Date.now().toString(),
+            type: "error",
+            title: "Auto-Compaction Failed",
+            message:
+              error instanceof Error ? error.message : "Unexpected error during auto-compaction",
+          });
+        } finally {
+          setIsSending(false);
+        }
+
+        return; // Skip normal send
+      }
+
+      // Regular message - send directly via API
+      setIsSending(true);
+
+      try {
         // When editing a /compact command, regenerate the actual summarization request
         let actualMessageText = messageText;
         let muxMetadata: MuxFrontendMetadata | undefined;
@@ -585,7 +649,11 @@ export const ChatInput: React.FC<ChatInputProps> = (props) => {
             } = prepareCompactionMessage({
               workspaceId: props.workspaceId,
               maxOutputTokens: parsedEditingCommand.maxOutputTokens,
-              continueMessage: parsedEditingCommand.continueMessage,
+              continueMessage: {
+                text: parsedEditingCommand.continueMessage ?? "",
+                imageParts,
+                model: sendMessageOptions.model,
+              },
               model: parsedEditingCommand.model,
               sendMessageOptions,
             });

@@ -6,8 +6,12 @@
  * to ensure consistent behavior and avoid duplication.
  */
 
-import type { SendMessageOptions } from "@/common/types/ipc";
-import type { MuxFrontendMetadata, CompactionRequestData } from "@/common/types/message";
+import type { SendMessageOptions, ImagePart } from "@/common/types/ipc";
+import type {
+  MuxFrontendMetadata,
+  CompactionRequestData,
+  ContinueMessage,
+} from "@/common/types/message";
 import type { FrontendWorkspaceMetadata } from "@/common/types/workspace";
 import type { RuntimeConfig } from "@/common/types/runtime";
 import { RUNTIME_MODE, SSH_RUNTIME_PREFIX } from "@/common/types/runtime";
@@ -16,6 +20,7 @@ import type { Toast } from "@/browser/components/ChatInputToast";
 import type { ParsedCommand } from "@/browser/utils/slashCommands/types";
 import { applyCompactionOverrides } from "@/browser/utils/messages/compactionOptions";
 import { resolveCompactionModel } from "@/browser/utils/messages/compactionModelPreference";
+import type { ImageAttachment } from "../components/ImageAttachments";
 import { dispatchWorkspaceSwitch } from "./workspaceEvents";
 import { getRuntimeKey, copyWorkspaceStorage } from "@/common/constants/storage";
 
@@ -504,7 +509,7 @@ export function formatNewCommand(
 export interface CompactionOptions {
   workspaceId: string;
   maxOutputTokens?: number;
-  continueMessage?: string;
+  continueMessage?: ContinueMessage;
   model?: string;
   sendMessageOptions: SendMessageOptions;
   editMessageId?: string;
@@ -530,18 +535,28 @@ export function prepareCompactionMessage(options: CompactionOptions): {
   let messageText = `Summarize this conversation into a compact form for a new Assistant to continue helping the user. Focus entirely on the summary of what has happened. Do not suggest next steps or future actions. Use approximately ${targetWords} words.`;
 
   if (options.continueMessage) {
-    messageText += `\n\nThe user wants to continue with: ${options.continueMessage}`;
+    messageText += `\n\nThe user wants to continue with: ${options.continueMessage.text}`;
   }
 
   // Handle model preference (sticky globally)
   const effectiveModel = resolveCompactionModel(options.model);
 
   // Create compaction metadata (will be stored in user message)
+  // Only include continueMessage if there's text or images to queue after compaction
+  const hasText = options.continueMessage?.text;
+  const hasImages =
+    options.continueMessage?.imageParts && options.continueMessage.imageParts.length > 0;
   const compactData: CompactionRequestData = {
     model: effectiveModel,
     maxOutputTokens: options.maxOutputTokens,
-    continueMessage: options.continueMessage,
-    resumeModel: options.sendMessageOptions.model,
+    continueMessage:
+      hasText || hasImages
+        ? {
+            text: options.continueMessage?.text ?? "",
+            imageParts: options.continueMessage?.imageParts,
+            model: options.continueMessage?.model ?? options.sendMessageOptions.model,
+          }
+        : undefined,
   };
 
   const metadata: MuxFrontendMetadata = {
@@ -595,7 +610,7 @@ function formatCompactionCommand(options: CompactionOptions): string {
     cmd += ` -m ${options.model}`;
   }
   if (options.continueMessage) {
-    cmd += `\n${options.continueMessage}`;
+    cmd += `\n${options.continueMessage.text}`;
   }
   return cmd;
 }
@@ -607,8 +622,10 @@ function formatCompactionCommand(options: CompactionOptions): string {
 export interface CommandHandlerContext {
   workspaceId: string;
   sendMessageOptions: SendMessageOptions;
+  imageParts?: ImagePart[];
   editMessageId?: string;
   setInput: (value: string) => void;
+  setImageAttachments: (images: ImageAttachment[]) => void;
   setIsSending: (value: boolean) => void;
   setToast: (toast: Toast) => void;
   onCancelEdit?: () => void;
@@ -722,19 +739,28 @@ export async function handleCompactCommand(
     sendMessageOptions,
     editMessageId,
     setInput,
+    setImageAttachments,
     setIsSending,
     setToast,
     onCancelEdit,
   } = context;
 
   setInput("");
+  setImageAttachments([]);
   setIsSending(true);
 
   try {
     const result = await executeCompaction({
       workspaceId,
       maxOutputTokens: parsed.maxOutputTokens,
-      continueMessage: parsed.continueMessage,
+      continueMessage:
+        parsed.continueMessage || (context.imageParts && context.imageParts.length > 0)
+          ? {
+              text: parsed.continueMessage ?? "",
+              imageParts: context.imageParts,
+              model: sendMessageOptions.model,
+            }
+          : undefined,
       model: parsed.model,
       sendMessageOptions,
       editMessageId,
