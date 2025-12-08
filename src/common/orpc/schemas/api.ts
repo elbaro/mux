@@ -15,6 +15,13 @@ import {
 } from "./terminal";
 import { BashToolResultSchema, FileTreeNodeSchema } from "./tools";
 import { FrontendWorkspaceMetadataSchema, WorkspaceActivitySnapshotSchema } from "./workspace";
+import {
+  MCPAddParamsSchema,
+  MCPRemoveParamsSchema,
+  MCPServerMapSchema,
+  MCPTestParamsSchema,
+  MCPTestResultSchema,
+} from "./mcp";
 
 // Re-export telemetry schemas
 export { telemetry, TelemetryEventSchema } from "./telemetry";
@@ -115,6 +122,24 @@ export const projects = {
   listBranches: {
     input: z.object({ projectPath: z.string() }),
     output: BranchListResultSchema,
+  },
+  mcp: {
+    list: {
+      input: z.object({ projectPath: z.string() }),
+      output: MCPServerMapSchema,
+    },
+    add: {
+      input: MCPAddParamsSchema,
+      output: ResultSchema(z.void(), z.string()),
+    },
+    remove: {
+      input: MCPRemoveParamsSchema,
+      output: ResultSchema(z.void(), z.string()),
+    },
+    test: {
+      input: MCPTestParamsSchema,
+      output: MCPTestResultSchema,
+    },
   },
   secrets: {
     get: {

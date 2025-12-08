@@ -1,11 +1,12 @@
 import React from "react";
-import { Settings, Key, Cpu, X } from "lucide-react";
+import { Settings, Key, Cpu, X, Briefcase } from "lucide-react";
 import { useSettings } from "@/browser/contexts/SettingsContext";
 import { Dialog, DialogContent, DialogTitle, VisuallyHidden } from "@/browser/components/ui/dialog";
 import { GeneralSection } from "./sections/GeneralSection";
 import { ProvidersSection } from "./sections/ProvidersSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { Button } from "@/browser/components/ui/button";
+import { ProjectSettingsSection } from "./sections/ProjectSettingsSection";
 import type { SettingsSection } from "./types";
 
 const SECTIONS: SettingsSection[] = [
@@ -20,6 +21,12 @@ const SECTIONS: SettingsSection[] = [
     label: "Providers",
     icon: <Key className="h-4 w-4" />,
     component: ProvidersSection,
+  },
+  {
+    id: "projects",
+    label: "Projects",
+    icon: <Briefcase className="h-4 w-4" />,
+    component: ProjectSettingsSection,
   },
   {
     id: "models",
@@ -62,7 +69,7 @@ export function SettingsModal() {
               <X className="h-4 w-4" />
             </Button>
           </div>
-          <nav className="flex overflow-x-auto p-2 md:flex-1 md:flex-col md:overflow-y-auto">
+          <nav className="flex gap-1 overflow-x-auto p-2 md:flex-1 md:flex-col md:overflow-y-auto">
             {SECTIONS.map((section) => (
               <Button
                 key={section.id}

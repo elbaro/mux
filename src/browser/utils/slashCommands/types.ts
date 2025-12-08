@@ -29,6 +29,10 @@ export type ParsedCommand =
       startMessage?: string;
     }
   | { type: "vim-toggle" }
+  | { type: "mcp-add"; name: string; command: string }
+  | { type: "mcp-edit"; name: string; command: string }
+  | { type: "mcp-remove"; name: string }
+  | { type: "mcp-open" }
   | { type: "unknown-command"; command: string; subcommand?: string }
   | null;
 

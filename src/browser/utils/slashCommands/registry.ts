@@ -585,6 +585,55 @@ const newCommandDefinition: SlashCommandDefinition = {
   },
 };
 
+/**
+ * Parse MCP subcommand that takes name + command (add/edit).
+ * Returns { name, command } or null if invalid.
+ */
+function parseMCPNameCommand(
+  subcommand: string,
+  tokens: string[],
+  rawInput: string
+): { name: string; command: string } | null {
+  const name = tokens[1];
+  // Extract command text after "subcommand name"
+  const command = rawInput
+    .trim()
+    .replace(new RegExp(`^${subcommand}\\s+[^\\s]+\\s*`, "i"), "")
+    .trim();
+  if (!name || !command) return null;
+  return { name, command };
+}
+
+const mcpCommandDefinition: SlashCommandDefinition = {
+  key: "mcp",
+  description: "Manage MCP servers for this project",
+  handler: ({ cleanRemainingTokens, rawInput }) => {
+    if (cleanRemainingTokens.length === 0) {
+      return { type: "mcp-open" };
+    }
+
+    const sub = cleanRemainingTokens[0];
+
+    if (sub === "add" || sub === "edit") {
+      const parsed = parseMCPNameCommand(sub, cleanRemainingTokens, rawInput);
+      if (!parsed) {
+        return { type: "unknown-command", command: "mcp", subcommand: sub };
+      }
+      return { type: sub === "add" ? "mcp-add" : "mcp-edit", ...parsed };
+    }
+
+    if (sub === "remove") {
+      const name = cleanRemainingTokens[1];
+      if (!name) {
+        return { type: "unknown-command", command: "mcp", subcommand: "remove" };
+      }
+      return { type: "mcp-remove", name };
+    }
+
+    return { type: "unknown-command", command: "mcp", subcommand: sub };
+  },
+};
+
 export const SLASH_COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = [
   clearCommandDefinition,
   truncateCommandDefinition,
@@ -595,6 +644,7 @@ export const SLASH_COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = [
   forkCommandDefinition,
   newCommandDefinition,
   vimCommandDefinition,
+  mcpCommandDefinition,
 ];
 
 export const SLASH_COMMAND_DEFINITION_MAP = new Map(
