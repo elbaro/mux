@@ -257,6 +257,8 @@ export const VimTextArea = React.forwardRef<HTMLTextAreaElement, VimTextAreaProp
             autoCorrect="off"
             autoCapitalize="none"
             autoComplete="off"
+            // Optimize for iPadOS/iOS keyboard behavior
+            enterKeyHint="send"
             {...rest}
             style={{
               ...(rest.style ?? {}),
