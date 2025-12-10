@@ -1,5 +1,6 @@
 import React from "react";
 import type { DisplayedMessage } from "@/common/types/message";
+import type { BashOutputGroupInfo } from "@/browser/utils/messages/messageUtils";
 import type { ReviewNoteData } from "@/common/types/review";
 import { UserMessage } from "./UserMessage";
 import { AssistantMessage } from "./AssistantMessage";
@@ -26,6 +27,8 @@ interface MessageRendererProps {
   foregroundBashToolCallIds?: Set<string>;
   /** Callback to send a foreground bash to background */
   onSendBashToBackground?: (toolCallId: string) => void;
+  /** Optional bash_output grouping info (computed at render-time) */
+  bashOutputGroup?: BashOutputGroupInfo;
 }
 
 // Memoized to prevent unnecessary re-renders when parent (AIView) updates
@@ -40,6 +43,7 @@ export const MessageRenderer = React.memo<MessageRendererProps>(
     isLatestProposePlan,
     foregroundBashToolCallIds,
     onSendBashToBackground,
+    bashOutputGroup,
   }) => {
     // Route based on message type
     switch (message.type) {
@@ -71,6 +75,7 @@ export const MessageRenderer = React.memo<MessageRendererProps>(
             isLatestProposePlan={isLatestProposePlan}
             foregroundBashToolCallIds={foregroundBashToolCallIds}
             onSendBashToBackground={onSendBashToBackground}
+            bashOutputGroup={bashOutputGroup}
           />
         );
       case "reasoning":

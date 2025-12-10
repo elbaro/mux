@@ -25,7 +25,9 @@ import { useResizableSidebar } from "@/browser/hooks/useResizableSidebar";
 import {
   shouldShowInterruptedBarrier,
   mergeConsecutiveStreamErrors,
+  computeBashOutputGroupInfo,
 } from "@/browser/utils/messages/messageUtils";
+import { BashOutputCollapsedIndicator } from "./tools/BashOutputCollapsedIndicator";
 import { hasInterruptedStream } from "@/browser/utils/messages/retryEligibility";
 import { ThinkingProvider } from "@/browser/contexts/ThinkingContext";
 import { ModeProvider } from "@/browser/contexts/ModeContext";
@@ -175,23 +177,28 @@ const AIViewInner: React.FC<AIViewProps> = ({
     undefined
   );
 
+  // Track which bash_output groups are expanded (keyed by first message ID)
+  const [expandedBashGroups, setExpandedBashGroups] = useState<Set<string>>(new Set());
+
   // Extract state from workspace state
   const { messages, canInterrupt, isCompacting, loading, currentModel } = workspaceState;
 
-  // Merge consecutive identical stream errors.
+  // Apply message transformations:
+  // 1. Merge consecutive identical stream errors
+  // (bash_output grouping is done at render-time, not as a transformation)
   // Use useDeferredValue to allow React to defer the heavy message list rendering
   // during rapid updates (streaming), keeping the UI responsive.
   // Must be defined before any early returns to satisfy React Hooks rules.
-  const mergedMessages = useMemo(() => mergeConsecutiveStreamErrors(messages), [messages]);
-  const deferredMergedMessages = useDeferredValue(mergedMessages);
+  const transformedMessages = useMemo(() => mergeConsecutiveStreamErrors(messages), [messages]);
+  const deferredTransformedMessages = useDeferredValue(transformedMessages);
 
   // CRITICAL: When message count changes (new message sent/received), show immediately.
   // Only defer content changes within existing messages (streaming deltas).
   // This ensures user messages appear instantly while keeping streaming performant.
   const deferredMessages =
-    mergedMessages.length !== deferredMergedMessages.length
-      ? mergedMessages
-      : deferredMergedMessages;
+    transformedMessages.length !== deferredTransformedMessages.length
+      ? transformedMessages
+      : deferredTransformedMessages;
 
   // Get active stream message ID for token counting
   const activeStreamMessageId = aggregator?.getActiveStreamMessageId();
@@ -311,8 +318,8 @@ const AIViewInner: React.FC<AIViewProps> = ({
     }
 
     // Otherwise, edit last user message
-    const mergedMessages = mergeConsecutiveStreamErrors(workspaceState.messages);
-    const lastUserMessage = [...mergedMessages]
+    const transformedMessages = mergeConsecutiveStreamErrors(workspaceState.messages);
+    const lastUserMessage = [...transformedMessages]
       .reverse()
       .find((msg): msg is Extract<DisplayedMessage, { type: "user" }> => msg.type === "user");
     if (lastUserMessage) {
@@ -432,8 +439,8 @@ const AIViewInner: React.FC<AIViewProps> = ({
   useEffect(() => {
     if (!workspaceState || !editingMessage) return;
 
-    const mergedMessages = mergeConsecutiveStreamErrors(workspaceState.messages);
-    const editCutoffHistoryId = mergedMessages.find(
+    const transformedMessages = mergeConsecutiveStreamErrors(workspaceState.messages);
+    const editCutoffHistoryId = transformedMessages.find(
       (msg): msg is Exclude<DisplayedMessage, { type: "history-hidden" | "workspace-init" }> =>
         msg.type !== "history-hidden" &&
         msg.type !== "workspace-init" &&
@@ -469,7 +476,7 @@ const AIViewInner: React.FC<AIViewProps> = ({
 
   // When editing, find the cutoff point
   const editCutoffHistoryId = editingMessage
-    ? mergedMessages.find(
+    ? transformedMessages.find(
         (msg): msg is Exclude<DisplayedMessage, { type: "history-hidden" | "workspace-init" }> =>
           msg.type !== "history-hidden" &&
           msg.type !== "workspace-init" &&
@@ -480,8 +487,8 @@ const AIViewInner: React.FC<AIViewProps> = ({
   // Find the ID of the latest propose_plan tool call for external edit detection
   // Only the latest plan should fetch fresh content from disk
   let latestProposePlanId: string | null = null;
-  for (let i = mergedMessages.length - 1; i >= 0; i--) {
-    const msg = mergedMessages[i];
+  for (let i = transformedMessages.length - 1; i >= 0; i--) {
+    const msg = transformedMessages[i];
     if (msg.type === "tool" && msg.toolName === "propose_plan") {
       latestProposePlanId = msg.id;
       break;
@@ -577,7 +584,21 @@ const AIViewInner: React.FC<AIViewProps> = ({
                 </div>
               ) : (
                 <>
-                  {deferredMessages.map((msg) => {
+                  {deferredMessages.map((msg, index) => {
+                    // Compute bash_output grouping at render-time
+                    const bashOutputGroup = computeBashOutputGroupInfo(deferredMessages, index);
+
+                    // For bash_output groups, use first message ID as expansion key
+                    const groupKey = bashOutputGroup
+                      ? deferredMessages[bashOutputGroup.firstIndex]?.id
+                      : undefined;
+                    const isGroupExpanded = groupKey ? expandedBashGroups.has(groupKey) : false;
+
+                    // Skip rendering middle items in a bash_output group (unless expanded)
+                    if (bashOutputGroup?.position === "middle" && !isGroupExpanded) {
+                      return null;
+                    }
+
                     const isAtCutoff =
                       editCutoffHistoryId !== undefined &&
                       msg.type !== "history-hidden" &&
@@ -607,8 +628,28 @@ const AIViewInner: React.FC<AIViewProps> = ({
                             }
                             foregroundBashToolCallIds={foregroundToolCallIds}
                             onSendBashToBackground={handleSendBashToBackground}
+                            bashOutputGroup={bashOutputGroup}
                           />
                         </div>
+                        {/* Show collapsed indicator after the first item in a bash_output group */}
+                        {bashOutputGroup?.position === "first" && groupKey && (
+                          <BashOutputCollapsedIndicator
+                            processId={bashOutputGroup.processId}
+                            collapsedCount={bashOutputGroup.collapsedCount}
+                            isExpanded={isGroupExpanded}
+                            onToggle={() => {
+                              setExpandedBashGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(groupKey)) {
+                                  next.delete(groupKey);
+                                } else {
+                                  next.add(groupKey);
+                                }
+                                return next;
+                              });
+                            }}
+                          />
+                        )}
                         {isAtCutoff && (
                           <div className="edit-cutoff-divider text-edit-mode bg-edit-mode/10 my-5 px-[15px] py-3 text-center text-xs font-medium">
                             ⚠️ Messages below this line will be removed when you submit the edit
