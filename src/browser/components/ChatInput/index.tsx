@@ -1352,7 +1352,14 @@ export const ChatInput: React.FC<ChatInputProps> = (props) => {
           projectName={props.projectName}
           isSending={creationState.isSending || isSending}
           workspaceName={
-            creationState.isSending || isSending ? creationState.creatingWithName : undefined
+            creationState.isSending || isSending
+              ? creationState.creatingWithIdentity?.name
+              : undefined
+          }
+          workspaceTitle={
+            creationState.isSending || isSending
+              ? creationState.creatingWithIdentity?.title
+              : undefined
           }
         />
       )}

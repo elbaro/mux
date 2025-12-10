@@ -42,6 +42,7 @@ import { SettingsProvider, useSettings } from "./contexts/SettingsContext";
 import { SettingsModal } from "./components/Settings/SettingsModal";
 import { TutorialProvider } from "./contexts/TutorialContext";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { getWorkspaceSidebarKey } from "./utils/workspace";
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "low", "medium", "high"];
 
@@ -137,10 +138,10 @@ function AppInner() {
         window.history.replaceState(null, "", newHash);
       }
 
-      // Update window title with workspace name
+      // Update window title with workspace title (or name for legacy workspaces)
       const metadata = workspaceMetadata.get(selectedWorkspace.workspaceId);
-      const workspaceName = metadata?.name ?? selectedWorkspace.workspaceId;
-      const title = `${workspaceName} - ${selectedWorkspace.projectName} - mux`;
+      const workspaceTitle = metadata?.title ?? metadata?.name ?? selectedWorkspace.workspaceId;
+      const title = `${workspaceTitle} - ${selectedWorkspace.projectName} - mux`;
       // Set document.title locally for browser mode, call backend for Electron
       document.title = title;
       void api?.window.setTitle({ title });
@@ -206,15 +207,12 @@ function AppInner() {
     (prev, next) =>
       compareMaps(prev, next, (a, b) => {
         if (a.length !== b.length) return false;
-        // Check ID, name, and status to detect changes
         return a.every((meta, i) => {
           const other = b[i];
-          return (
-            other &&
-            meta.id === other.id &&
-            meta.name === other.name &&
-            meta.status === other.status
-          );
+          // Compare all fields that affect sidebar display.
+          // If you add a new display-relevant field to WorkspaceMetadata,
+          // add it to getWorkspaceSidebarKey() in src/browser/utils/workspace.ts
+          return other && getWorkspaceSidebarKey(meta) === getWorkspaceSidebarKey(other);
         });
       }),
     [projects, workspaceMetadata, workspaceRecency]

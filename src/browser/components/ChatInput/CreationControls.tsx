@@ -18,7 +18,7 @@ interface CreationControlsProps {
   onSetDefaultRuntime: (mode: RuntimeMode) => void;
   onSshHostChange: (host: string) => void;
   disabled: boolean;
-  /** Workspace name generation state and actions */
+  /** Workspace name/title generation state and actions */
   nameState: WorkspaceNameState;
 }
 

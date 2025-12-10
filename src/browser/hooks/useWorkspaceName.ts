@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useAPI } from "@/browser/contexts/API";
-import { validateWorkspaceName } from "@/common/utils/validation/workspaceValidation";
 
 export interface UseWorkspaceNameOptions {
   /** The user's message to generate a name for */
@@ -11,9 +10,17 @@ export interface UseWorkspaceNameOptions {
   fallbackModel?: string;
 }
 
+/** Generated workspace identity (name + title) */
+export interface WorkspaceIdentity {
+  /** Short git-safe name with suffix (e.g., "plan-a1b2") */
+  name: string;
+  /** Human-readable title (e.g., "Fix plan mode over SSH") */
+  title: string;
+}
+
 /** State and actions for workspace name generation, suitable for passing to components */
 export interface WorkspaceNameState {
-  /** The generated or manually entered name */
+  /** The generated or manually entered name (shown in CreationControls UI) */
   name: string;
   /** Whether name generation is in progress */
   isGenerating: boolean;
@@ -28,8 +35,8 @@ export interface WorkspaceNameState {
 }
 
 export interface UseWorkspaceNameReturn extends WorkspaceNameState {
-  /** Wait for any pending generation to complete */
-  waitForGeneration: () => Promise<string>;
+  /** Wait for any pending generation to complete, returns both name and title */
+  waitForGeneration: () => Promise<WorkspaceIdentity | null>;
 }
 
 /**
@@ -43,7 +50,9 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
   const { message, debounceMs = 500, fallbackModel } = options;
   const { api } = useAPI();
 
-  const [generatedName, setGeneratedName] = useState("");
+  // Generated identity (name + title) from AI
+  const [generatedIdentity, setGeneratedIdentity] = useState<WorkspaceIdentity | null>(null);
+  // Manual name (user-editable during creation)
   const [manualName, setManualName] = useState("");
   const [autoGenerate, setAutoGenerate] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -59,14 +68,15 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
   const requestIdRef = useRef(0);
   // Current in-flight generation promise and its resolver
   const generationPromiseRef = useRef<{
-    promise: Promise<string>;
-    resolve: (name: string) => void;
+    promise: Promise<WorkspaceIdentity | null>;
+    resolve: (identity: WorkspaceIdentity | null) => void;
     requestId: number;
   } | null>(null);
 
-  const name = autoGenerate ? generatedName : manualName;
+  // Name shown in CreationControls UI: generated name when auto, manual when not
+  const name = autoGenerate ? (generatedIdentity?.name ?? "") : manualName;
 
-  // Cancel any pending generation and resolve waiters with empty string
+  // Cancel any pending generation and resolve waiters with null
   const cancelPendingGeneration = useCallback(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -78,16 +88,16 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
     requestIdRef.current++;
     // Resolve any waiters so they don't hang forever
     if (generationPromiseRef.current?.requestId === oldRequestId) {
-      generationPromiseRef.current.resolve("");
+      generationPromiseRef.current.resolve(null);
       generationPromiseRef.current = null;
       setIsGenerating(false);
     }
   }, []);
 
-  const generateName = useCallback(
-    async (forMessage: string): Promise<string> => {
+  const generateIdentity = useCallback(
+    async (forMessage: string): Promise<WorkspaceIdentity | null> => {
       if (!api || !forMessage.trim()) {
-        return "";
+        return null;
       }
 
       const requestId = ++requestIdRef.current;
@@ -95,8 +105,8 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
       setError(null);
 
       // Create a promise that external callers can wait on
-      let resolvePromise: ((name: string) => void) | undefined;
-      const promise = new Promise<string>((resolve) => {
+      let resolvePromise: ((identity: WorkspaceIdentity | null) => void) | undefined;
+      const promise = new Promise<WorkspaceIdentity | null>((resolve) => {
         resolvePromise = resolve;
       });
       // TypeScript doesn't understand the Promise executor runs synchronously
@@ -112,32 +122,35 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
         // Check if this request is still current (wasn't cancelled)
         if (requestId !== requestIdRef.current) {
           // Don't resolve here - cancellation already resolved the promise
-          return "";
+          return null;
         }
 
         if (result.success) {
-          const name = result.data.name;
-          setGeneratedName(name);
+          const identity: WorkspaceIdentity = {
+            name: result.data.name,
+            title: result.data.title,
+          };
+          setGeneratedIdentity(identity);
           lastGeneratedForRef.current = forMessage;
-          safeResolve(name);
-          return name;
+          safeResolve(identity);
+          return identity;
         } else {
           const errorMsg =
             result.error.type === "unknown" && "raw" in result.error
               ? result.error.raw
               : `Generation failed: ${result.error.type}`;
           setError(errorMsg);
-          safeResolve("");
-          return "";
+          safeResolve(null);
+          return null;
         }
       } catch (err) {
         if (requestId !== requestIdRef.current) {
-          return "";
+          return null;
         }
         const errorMsg = err instanceof Error ? err.message : String(err);
         setError(errorMsg);
-        safeResolve("");
-        return "";
+        safeResolve(null);
+        return null;
       } finally {
         if (requestId === requestIdRef.current) {
           setIsGenerating(false);
@@ -175,7 +188,7 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
       const msg = pendingMessageRef.current;
       debounceTimerRef.current = null;
       pendingMessageRef.current = "";
-      void generateName(msg);
+      void generateIdentity(msg);
     }, debounceMs);
 
     return () => {
@@ -185,7 +198,7 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
         pendingMessageRef.current = "";
       }
     };
-  }, [message, autoGenerate, debounceMs, generateName, cancelPendingGeneration]);
+  }, [message, autoGenerate, debounceMs, generateIdentity, cancelPendingGeneration]);
 
   // When auto-generate is toggled, handle name preservation
   const handleSetAutoGenerate = useCallback(
@@ -196,39 +209,42 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
         setError(null);
       } else {
         // Switching to manual: copy generated name as starting point for editing
-        if (generatedName) {
-          setManualName(generatedName);
+        if (generatedIdentity?.name) {
+          setManualName(generatedIdentity.name);
         }
       }
       setAutoGenerate(enabled);
     },
-    [generatedName]
+    [generatedIdentity]
   );
 
-  const setName = useCallback((name: string) => {
-    setManualName(name);
-    // Validate manual input and show errors in real-time
-    if (name.trim()) {
-      const validation = validateWorkspaceName(name);
-      setError(validation.error ?? null);
-    } else {
-      setError(null);
-    }
+  const setNameManual = useCallback((newName: string) => {
+    setManualName(newName);
+    // Clear error when user starts typing
+    setError(null);
   }, []);
 
-  const waitForGeneration = useCallback(async (): Promise<string> => {
-    // If auto-generate is off, return the manual name (or set error if empty)
+  const waitForGeneration = useCallback(async (): Promise<WorkspaceIdentity | null> => {
+    // If auto-generate is off, user has provided a manual name
+    // Use that name directly with a generated title from the message
     if (!autoGenerate) {
       if (!manualName.trim()) {
         setError("Please enter a workspace name");
-        return "";
+        return null;
       }
-      return manualName;
+      // Generate identity for the message to get the title, then override name with manual
+      const identity = await generateIdentity(message);
+      if (identity) {
+        // Use manual name with AI-generated title
+        return { name: manualName.trim(), title: identity.title };
+      }
+      // Fallback: if generation fails, use manual name as title too
+      return { name: manualName.trim(), title: manualName.trim() };
     }
 
     // Always wait for generation to complete on the full message.
     // With voice input, the message can go from empty to complete very quickly,
-    // so we must ensure the generated name reflects the total content.
+    // so we must ensure the generated identity reflects the total content.
 
     // If there's a debounced generation pending, trigger it immediately
     // Use the captured message from pendingMessageRef to avoid stale closures
@@ -238,7 +254,7 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
       const msg = pendingMessageRef.current;
       pendingMessageRef.current = "";
       if (msg.trim()) {
-        return generateName(msg);
+        return generateIdentity(msg);
       }
     }
 
@@ -247,18 +263,18 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
       return generationPromiseRef.current.promise;
     }
 
-    // If we have a name that was generated for the current message, use it
-    if (generatedName && lastGeneratedForRef.current === message) {
-      return generatedName;
+    // If we have an identity that was generated for the current message, use it
+    if (generatedIdentity && lastGeneratedForRef.current === message) {
+      return generatedIdentity;
     }
 
-    // Otherwise generate a fresh name for the current message
+    // Otherwise generate a fresh identity for the current message
     if (message.trim()) {
-      return generateName(message);
+      return generateIdentity(message);
     }
 
-    return "";
-  }, [autoGenerate, manualName, generatedName, message, generateName]);
+    return null;
+  }, [autoGenerate, manualName, generatedIdentity, message, generateIdentity]);
 
   return useMemo(
     () => ({
@@ -267,9 +283,17 @@ export function useWorkspaceName(options: UseWorkspaceNameOptions): UseWorkspace
       autoGenerate,
       error,
       setAutoGenerate: handleSetAutoGenerate,
-      setName,
+      setName: setNameManual,
       waitForGeneration,
     }),
-    [name, isGenerating, autoGenerate, error, handleSetAutoGenerate, setName, waitForGeneration]
+    [
+      name,
+      isGenerating,
+      autoGenerate,
+      error,
+      handleSetAutoGenerate,
+      setNameManual,
+      waitForGeneration,
+    ]
   );
 }
