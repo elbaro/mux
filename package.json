@@ -1,6 +1,6 @@
 {
   "name": "mux",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "mux - coder multiplexer",
   "author": "Coder",
   "main": "dist/cli/index.js",
