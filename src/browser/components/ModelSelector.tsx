@@ -9,9 +9,11 @@ import React, {
 import { cn } from "@/common/lib/utils";
 import { Settings, Star } from "lucide-react";
 import { GatewayIcon } from "./icons/GatewayIcon";
+import { ProviderIcon } from "./ProviderIcon";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
 import { useSettings } from "@/browser/contexts/SettingsContext";
 import { useGateway } from "@/browser/hooks/useGatewayModels";
+import { formatModelDisplayName } from "@/common/utils/ai/modelDisplay";
 
 interface ModelSelectorProps {
   value: string;
@@ -194,6 +196,13 @@ export const ModelSelector = forwardRef<ModelSelectorRef, ModelSelectorProps>(
 
     if (!isEditing) {
       const gatewayActive = gateway.isModelRoutingThroughGateway(value);
+
+      // Parse provider and model name from value (format: "provider:model-name")
+      const [provider, modelName] = value.includes(":") ? value.split(":", 2) : ["", value];
+      // For mux-gateway format, extract inner provider
+      const innerProvider =
+        provider === "mux-gateway" && modelName.includes("/") ? modelName.split("/")[0] : provider;
+
       return (
         <div ref={containerRef} className="relative flex items-center gap-1">
           {gatewayActive && (
@@ -204,12 +213,18 @@ export const ModelSelector = forwardRef<ModelSelectorRef, ModelSelectorProps>(
               <TooltipContent align="center">Using Mux Gateway</TooltipContent>
             </Tooltip>
           )}
-          <div
-            className="text-muted-light font-monospace dir-rtl hover:bg-hover max-w-36 cursor-pointer truncate rounded-sm px-1 py-0.5 text-left font-mono text-[10px] leading-[11px] transition-colors duration-200"
-            onClick={handleClick}
-          >
-            {value}
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className="text-muted-light hover:bg-hover flex cursor-pointer items-center gap-1 rounded-sm px-1 py-0.5 text-[11px] transition-colors duration-200"
+                onClick={handleClick}
+              >
+                <ProviderIcon provider={innerProvider} className="h-3 w-3 shrink-0 opacity-70" />
+                <span>{formatModelDisplayName(modelName)}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent align="center">{value}</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button

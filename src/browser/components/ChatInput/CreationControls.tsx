@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect } from "react";
 import { RUNTIME_MODE, type RuntimeMode } from "@/common/types/runtime";
 import { Select } from "../Select";
-import { RuntimeIconSelector } from "../RuntimeIconSelector";
 import { Loader2, Wand2 } from "lucide-react";
 import { cn } from "@/common/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
+import { SSHIcon, WorktreeIcon, LocalIcon } from "../icons/RuntimeIcons";
+import { DocsLink } from "../DocsLink";
 import type { WorkspaceNameState } from "@/browser/hooks/useWorkspaceName";
 
 interface CreationControlsProps {
@@ -20,17 +21,134 @@ interface CreationControlsProps {
   onSetDefaultRuntime: (mode: RuntimeMode) => void;
   onSshHostChange: (host: string) => void;
   disabled: boolean;
+  /** Project name to display as header */
+  projectName: string;
   /** Workspace name/title generation state and actions */
   nameState: WorkspaceNameState;
 }
 
+/** Runtime type button group with icons and colors */
+interface RuntimeButtonGroupProps {
+  value: RuntimeMode;
+  onChange: (mode: RuntimeMode) => void;
+  defaultMode: RuntimeMode;
+  onSetDefault: (mode: RuntimeMode) => void;
+  disabled?: boolean;
+  disabledModes?: RuntimeMode[];
+}
+
+const RUNTIME_OPTIONS: Array<{
+  value: RuntimeMode;
+  label: string;
+  description: string;
+  docsPath: string;
+  Icon: React.FC<{ size?: number; className?: string }>;
+  // Active state colors using CSS variables for theme support
+  activeClass: string;
+  idleClass: string;
+}> = [
+  {
+    value: RUNTIME_MODE.LOCAL,
+    label: "Local",
+    description: "Work directly in project directory",
+    docsPath: "/runtime/local",
+    Icon: LocalIcon,
+    activeClass:
+      "bg-[var(--color-runtime-local)]/30 text-foreground border-[var(--color-runtime-local)]/60",
+    idleClass:
+      "bg-transparent text-muted border-transparent hover:border-[var(--color-runtime-local)]/40",
+  },
+  {
+    value: RUNTIME_MODE.WORKTREE,
+    label: "Worktree",
+    description: "Isolated git worktree",
+    docsPath: "/runtime/worktree",
+    Icon: WorktreeIcon,
+    activeClass:
+      "bg-[var(--color-runtime-worktree)]/20 text-[var(--color-runtime-worktree-text)] border-[var(--color-runtime-worktree)]/60",
+    idleClass:
+      "bg-transparent text-muted border-transparent hover:border-[var(--color-runtime-worktree)]/40",
+  },
+  {
+    value: RUNTIME_MODE.SSH,
+    label: "Remote",
+    description: "Clone on SSH host",
+    docsPath: "/runtime/ssh",
+    Icon: SSHIcon,
+    activeClass:
+      "bg-[var(--color-runtime-ssh)]/20 text-[var(--color-runtime-ssh-text)] border-[var(--color-runtime-ssh)]/60",
+    idleClass:
+      "bg-transparent text-muted border-transparent hover:border-[var(--color-runtime-ssh)]/40",
+  },
+];
+
+function RuntimeButtonGroup(props: RuntimeButtonGroupProps) {
+  const disabledModes = props.disabledModes ?? [];
+
+  return (
+    <div className="flex gap-1">
+      {RUNTIME_OPTIONS.map((option) => {
+        const isActive = props.value === option.value;
+        const isDefault = props.defaultMode === option.value;
+        const isModeDisabled = disabledModes.includes(option.value);
+        const Icon = option.Icon;
+
+        return (
+          <Tooltip key={option.value}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => props.onChange(option.value)}
+                disabled={Boolean(props.disabled) || isModeDisabled}
+                aria-pressed={isActive}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-all duration-150",
+                  "cursor-pointer",
+                  isActive ? option.activeClass : option.idleClass,
+                  (Boolean(props.disabled) || isModeDisabled) && "cursor-not-allowed opacity-50"
+                )}
+              >
+                <Icon size={12} />
+                {option.label}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              align="center"
+              side="bottom"
+              className="pointer-events-auto whitespace-normal"
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <span>{option.description}</span>
+                <DocsLink path={option.docsPath} />
+              </div>
+              {isModeDisabled ? (
+                <p className="mt-1 text-yellow-500">Requires git repository</p>
+              ) : (
+                <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={isDefault}
+                    onChange={() => props.onSetDefault(option.value)}
+                    className="accent-accent h-3 w-3"
+                  />
+                  <span className="text-muted">Default for project</span>
+                </label>
+              )}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
- * Additional controls shown only during workspace creation
- * - Trunk branch selector (which branch to fork from) - hidden for Local runtime
- * - Runtime mode (Local, Worktree, SSH) - only Local available for non-git directories
- * - Workspace name (auto-generated with manual override)
+ * Prominent controls shown above the input during workspace creation.
+ * Displays project name as header, workspace name with magic wand, and runtime/branch selectors.
  */
 export function CreationControls(props: CreationControlsProps) {
+  const { nameState } = props;
+
   // Non-git directories (empty branches after loading completes) can only use local runtime
   // Don't check until branches have loaded to avoid prematurely switching runtime
   const isNonGitRepo = props.branchesLoaded && props.branches.length === 0;
@@ -39,7 +157,7 @@ export function CreationControls(props: CreationControlsProps) {
   const showTrunkBranchSelector =
     props.branches.length > 0 && props.runtimeMode !== RUNTIME_MODE.LOCAL;
 
-  const { runtimeMode, onRuntimeModeChange, nameState } = props;
+  const { runtimeMode, onRuntimeModeChange } = props;
 
   // Force local runtime for non-git directories (only after branches loaded)
   useEffect(() => {
@@ -68,28 +186,42 @@ export function CreationControls(props: CreationControlsProps) {
   }, [nameState]);
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* First row: Workspace name with magic wand toggle */}
-      <div className="flex items-center gap-2" data-component="WorkspaceNameGroup">
-        <label htmlFor="workspace-name" className="text-muted text-xs whitespace-nowrap">
-          Name:
-        </label>
-        <div className="relative max-w-xs flex-1">
-          <input
-            id="workspace-name"
-            type="text"
-            value={nameState.name}
-            onChange={handleNameChange}
-            onFocus={handleInputFocus}
-            placeholder={nameState.isGenerating ? "Generating..." : "workspace-name"}
-            disabled={props.disabled}
-            className={cn(
-              "bg-separator text-foreground border-border-medium focus:border-accent h-6 w-full rounded border px-2 pr-6 text-xs focus:outline-none disabled:opacity-50",
-              nameState.error && "border-red-500"
-            )}
-          />
-          {/* Magic wand / loading indicator - vertically centered */}
-          <div className="absolute inset-y-0 right-0 flex items-center pr-1.5">
+    <div className="mb-3 flex flex-col gap-4">
+      {/* Project name / workspace name header row */}
+      <div className="flex items-center" data-component="WorkspaceNameGroup">
+        <h2 className="text-foreground shrink-0 text-lg font-semibold">{props.projectName}</h2>
+        <span className="text-muted-foreground mx-2 text-lg">/</span>
+
+        {/* Name input with magic wand - uses grid overlay technique for auto-sizing */}
+        <div className="relative inline-grid items-center">
+          {/* Hidden sizer span - determines width based on content, minimum is placeholder width */}
+          <span className="invisible col-start-1 row-start-1 pr-7 text-lg font-semibold whitespace-pre">
+            {nameState.name || "workspace-name"}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <input
+                id="workspace-name"
+                type="text"
+                size={1}
+                value={nameState.name}
+                onChange={handleNameChange}
+                onFocus={handleInputFocus}
+                placeholder={nameState.isGenerating ? "Generating..." : "workspace-name"}
+                disabled={props.disabled}
+                className={cn(
+                  "col-start-1 row-start-1 min-w-0 bg-transparent border-border-medium focus:border-accent h-7 w-full rounded-md border border-transparent text-lg font-semibold focus:border focus:bg-bg-dark focus:outline-none disabled:opacity-50",
+                  nameState.autoGenerate ? "text-muted" : "text-foreground",
+                  nameState.error && "border-red-500"
+                )}
+              />
+            </TooltipTrigger>
+            <TooltipContent align="start" className="max-w-64">
+              A stable identifier used for git branches, worktree folders, and session directories.
+            </TooltipContent>
+          </Tooltip>
+          {/* Magic wand / loading indicator */}
+          <div className="absolute inset-y-0 right-0 flex items-center pr-2">
             {nameState.isGenerating ? (
               <Loader2 className="text-accent h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -121,54 +253,60 @@ export function CreationControls(props: CreationControlsProps) {
             )}
           </div>
         </div>
-        {/* Error display - inline */}
+
+        {/* Error display */}
         {nameState.error && <span className="text-xs text-red-500">{nameState.error}</span>}
       </div>
 
-      {/* Second row: Runtime, Branch, SSH */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {/* Runtime Selector - icon-based with tooltips */}
-        <RuntimeIconSelector
-          value={props.runtimeMode}
-          onChange={props.onRuntimeModeChange}
-          defaultMode={props.defaultRuntimeMode}
-          onSetDefault={props.onSetDefaultRuntime}
-          disabled={props.disabled}
-          disabledModes={isNonGitRepo ? [RUNTIME_MODE.WORKTREE, RUNTIME_MODE.SSH] : undefined}
-        />
-
-        {/* Trunk Branch Selector - hidden for Local runtime */}
-        {showTrunkBranchSelector && (
-          <div
-            className="flex h-6 items-center gap-1"
-            data-component="TrunkBranchGroup"
-            data-tutorial="trunk-branch"
-          >
-            <label htmlFor="trunk-branch" className="text-muted text-xs">
-              From:
-            </label>
-            <Select
-              id="trunk-branch"
-              value={props.trunkBranch}
-              options={props.branches}
-              onChange={props.onTrunkBranchChange}
-              disabled={props.disabled}
-              className="h-6 max-w-[120px]"
-            />
-          </div>
-        )}
-
-        {/* SSH Host Input - after From selector */}
-        {props.runtimeMode === RUNTIME_MODE.SSH && (
-          <input
-            type="text"
-            value={props.sshHost}
-            onChange={(e) => props.onSshHostChange(e.target.value)}
-            placeholder="user@host"
+      {/* Runtime type - button group */}
+      <div className="flex flex-col gap-1.5" data-component="RuntimeTypeGroup">
+        <label className="text-muted-foreground text-xs font-medium">Workspace Type</label>
+        <div className="flex flex-wrap items-center gap-3">
+          <RuntimeButtonGroup
+            value={props.runtimeMode}
+            onChange={props.onRuntimeModeChange}
+            defaultMode={props.defaultRuntimeMode}
+            onSetDefault={props.onSetDefaultRuntime}
             disabled={props.disabled}
-            className="bg-separator text-foreground border-border-medium focus:border-accent h-6 w-32 rounded border px-1 text-xs focus:outline-none disabled:opacity-50"
+            disabledModes={isNonGitRepo ? [RUNTIME_MODE.WORKTREE, RUNTIME_MODE.SSH] : undefined}
           />
-        )}
+
+          {/* Branch selector - shown for worktree/SSH */}
+          {showTrunkBranchSelector && (
+            <div
+              className="flex items-center gap-2"
+              data-component="TrunkBranchGroup"
+              data-tutorial="trunk-branch"
+            >
+              <label htmlFor="trunk-branch" className="text-muted-foreground text-xs">
+                from
+              </label>
+              <Select
+                id="trunk-branch"
+                value={props.trunkBranch}
+                options={props.branches}
+                onChange={props.onTrunkBranchChange}
+                disabled={props.disabled}
+                className="h-7 max-w-[140px]"
+              />
+            </div>
+          )}
+
+          {/* SSH Host Input */}
+          {props.runtimeMode === RUNTIME_MODE.SSH && (
+            <div className="flex items-center gap-2">
+              <label className="text-muted-foreground text-xs">host</label>
+              <input
+                type="text"
+                value={props.sshHost}
+                onChange={(e) => props.onSshHostChange(e.target.value)}
+                placeholder="user@host"
+                disabled={props.disabled}
+                className="bg-bg-dark text-foreground border-border-medium focus:border-accent h-7 w-36 rounded-md border px-2 text-sm focus:outline-none disabled:opacity-50"
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
