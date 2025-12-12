@@ -9,10 +9,17 @@ import { CostsTab } from "./RightSidebar/CostsTab";
 import { VerticalTokenMeter } from "./RightSidebar/VerticalTokenMeter";
 import { ReviewPanel } from "./RightSidebar/CodeReview/ReviewPanel";
 import { calculateTokenMeterData } from "@/common/utils/tokens/tokenMeterUtils";
+import { sumUsageHistory, type ChatUsageDisplay } from "@/common/utils/tokens/usageAggregator";
 import { matchesKeybind, KEYBINDS, formatKeybind } from "@/browser/utils/ui/keybinds";
 import { Tooltip, TooltipTrigger, TooltipContent } from "./ui/tooltip";
 import { cn } from "@/common/lib/utils";
 import type { ReviewNoteData } from "@/common/types/review";
+
+/** Stats reported by ReviewPanel for tab display */
+export interface ReviewStats {
+  total: number;
+  read: number;
+}
 
 interface SidebarContainerProps {
   collapsed: boolean;
@@ -107,6 +114,9 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
   // Trigger for focusing Review panel (preserves hunk selection)
   const [focusTrigger, setFocusTrigger] = React.useState(0);
 
+  // Review stats reported by ReviewPanel
+  const [reviewStats, setReviewStats] = React.useState<ReviewStats | null>(null);
+
   // Notify parent (AIView) of tab changes so it can enable/disable resize functionality
   React.useEffect(() => {
     onTabChange?.(selectedTab);
@@ -143,6 +153,26 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
   // Use lastContextUsage for context window display (last step = actual context size)
   const lastUsage = usage?.liveUsage ?? usage?.lastContextUsage;
   const model = lastUsage?.model ?? null;
+
+  // Calculate session cost for tab display
+  const sessionCost = React.useMemo(() => {
+    const parts: ChatUsageDisplay[] = [];
+    if (usage.sessionTotal) parts.push(usage.sessionTotal);
+    if (usage.liveCostUsage) parts.push(usage.liveCostUsage);
+    if (parts.length === 0) return null;
+
+    const aggregated = sumUsageHistory(parts);
+    if (!aggregated) return null;
+
+    // Sum all cost components
+    const total =
+      (aggregated.input.cost_usd ?? 0) +
+      (aggregated.cached.cost_usd ?? 0) +
+      (aggregated.cacheCreate.cost_usd ?? 0) +
+      (aggregated.output.cost_usd ?? 0) +
+      (aggregated.reasoning.cost_usd ?? 0);
+    return total > 0 ? total : null;
+  }, [usage.sessionTotal, usage.liveCostUsage]);
 
   // Auto-compaction settings: threshold per-model
   const { threshold: autoCompactThreshold, setThreshold: setAutoCompactThreshold } =
@@ -215,28 +245,25 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
     >
       {/* Full view when not collapsed */}
       <div className={cn("flex-row h-full", !showCollapsed ? "flex" : "hidden")}>
-        {/* Render meter when Review tab is active */}
-        {selectedTab === "review" && (
-          <div className="bg-sidebar border-border-light flex w-5 shrink-0 flex-col border-r">
-            {verticalMeter}
-          </div>
-        )}
-
-        {/* Render resize handle to right of meter when Review tab is active */}
+        {/* Resize handle (left edge) when Review tab is active */}
         {selectedTab === "review" && onStartResize && (
           <div
             className={cn(
-              "w-1 flex-shrink-0 z-10 transition-[background] duration-150",
-              "bg-border-light cursor-col-resize hover:bg-accent",
-              isResizing && "bg-accent"
+              "w-0.5 flex-shrink-0 z-10 transition-[background] duration-150 cursor-col-resize",
+              isResizing ? "bg-accent" : "bg-border-light hover:bg-accent"
             )}
             onMouseDown={(e) => onStartResize(e as unknown as React.MouseEvent)}
           />
         )}
 
+        {/* Render meter when Review tab is active */}
+        {selectedTab === "review" && (
+          <div className="bg-sidebar flex w-5 shrink-0 flex-col">{verticalMeter}</div>
+        )}
+
         <div className="flex min-w-0 flex-1 flex-col">
           <div
-            className="bg-background-secondary border-border flex border-b [&>*]:flex-1"
+            className="border-border-light flex gap-1 border-b px-2 py-1.5"
             role="tablist"
             aria-label="Metadata views"
           >
@@ -244,10 +271,10 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
               <TooltipTrigger asChild>
                 <button
                   className={cn(
-                    "w-full py-2.5 px-[15px] border-none border-solid cursor-pointer font-primary text-[13px] font-medium transition-all duration-200",
+                    "rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 flex items-center gap-1.5",
                     selectedTab === "costs"
-                      ? "bg-separator border-b-2 border-b-plan-mode text-[var(--color-sidebar-tab-active)]"
-                      : "bg-transparent text-secondary border-b-2 border-b-transparent hover:bg-background-secondary hover:text-foreground"
+                      ? "bg-hover text-foreground"
+                      : "bg-transparent text-muted hover:bg-hover/50 hover:text-foreground"
                   )}
                   onClick={() => setSelectedTab("costs")}
                   id={costsTabId}
@@ -257,6 +284,11 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
                   aria-controls={costsPanelId}
                 >
                   Costs
+                  {sessionCost !== null && (
+                    <span className="text-muted text-[10px]">
+                      ${sessionCost < 0.01 ? "<0.01" : sessionCost.toFixed(2)}
+                    </span>
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" align="center">
@@ -267,10 +299,10 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
               <TooltipTrigger asChild>
                 <button
                   className={cn(
-                    "w-full py-2.5 px-[15px] border-none border-solid cursor-pointer font-primary text-[13px] font-medium transition-all duration-200",
+                    "rounded-md px-3 py-1 text-xs font-medium transition-all duration-150 flex items-center gap-1.5",
                     selectedTab === "review"
-                      ? "bg-separator border-b-2 border-b-plan-mode text-[var(--color-sidebar-tab-active)]"
-                      : "bg-transparent text-secondary border-b-2 border-b-transparent hover:bg-background-secondary hover:text-foreground"
+                      ? "bg-hover text-foreground"
+                      : "bg-transparent text-muted hover:bg-hover/50 hover:text-foreground"
                   )}
                   onClick={() => setSelectedTab("review")}
                   id={reviewTabId}
@@ -280,6 +312,18 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
                   aria-controls={reviewPanelId}
                 >
                   Review
+                  {reviewStats !== null && reviewStats.total > 0 && (
+                    <span
+                      className={cn(
+                        "text-[10px]",
+                        reviewStats.read === reviewStats.total
+                          ? "text-muted" // All read - dimmed
+                          : "text-muted"
+                      )}
+                    >
+                      {reviewStats.read}/{reviewStats.total}
+                    </span>
+                  )}
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" align="center">
@@ -309,6 +353,7 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
                   onReviewNote={onReviewNote}
                   focusTrigger={focusTrigger}
                   isCreating={isCreating}
+                  onStatsChange={setReviewStats}
                 />
               </div>
             )}
