@@ -693,6 +693,12 @@ export const router = (authToken?: string) => {
             input.excluded
           );
         }),
+      getSessionUsage: t
+        .input(schemas.workspace.getSessionUsage.input)
+        .output(schemas.workspace.getSessionUsage.output)
+        .handler(async ({ context, input }) => {
+          return context.sessionUsageService.getSessionUsage(input.workspaceId);
+        }),
     },
     window: {
       setTitle: t

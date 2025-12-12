@@ -1,6 +1,6 @@
 import { eventIterator } from "@orpc/server";
 import { z } from "zod";
-import { ChatStatsSchema } from "./chatStats";
+import { ChatStatsSchema, SessionUsageFileSchema } from "./chatStats";
 import { SendMessageErrorSchema } from "./errors";
 import { BranchListResultSchema, ImagePartSchema, MuxMessageSchema } from "./message";
 import { ProjectConfigSchema } from "./project";
@@ -389,6 +389,10 @@ export const workspace = {
       excluded: z.boolean(),
     }),
     output: ResultSchema(z.void(), z.string()),
+  },
+  getSessionUsage: {
+    input: z.object({ workspaceId: z.string() }),
+    output: SessionUsageFileSchema.optional(),
   },
 };
 

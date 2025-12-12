@@ -6,8 +6,7 @@ import type { WorkspaceChatMessage, DeleteMessage } from "@/common/orpc/types";
 import type { Result } from "@/common/types/result";
 import { Ok, Err } from "@/common/types/result";
 import type { LanguageModelV2Usage } from "@ai-sdk/provider";
-import { collectUsageHistory } from "@/common/utils/tokens/displayUsage";
-import { sumUsageHistory } from "@/common/utils/tokens/usageAggregator";
+
 import { createMuxMessage, type MuxMessage } from "@/common/types/message";
 import { log } from "@/node/services/log";
 import {
@@ -109,7 +108,7 @@ export class CompactionHandler {
     // Mark as processed before performing compaction
     this.processedCompactionRequestIds.add(lastUserMsg.id);
 
-    const result = await this.performCompaction(summary, messages, event.metadata);
+    const result = await this.performCompaction(summary, event.metadata, messages);
     if (!result.success) {
       log.error("Compaction failed:", result.error);
       return false;
@@ -124,27 +123,22 @@ export class CompactionHandler {
    * Perform history compaction by replacing all messages with a summary
    *
    * Steps:
-   * 1. Calculate cumulative usage from all messages (for historicalUsage field)
-   * 2. Clear entire history and get deleted sequence numbers
-   * 3. Append summary message with metadata
-   * 4. Emit delete event for old messages
-   * 5. Emit summary message to frontend
+   * 1. Clear entire history and get deleted sequence numbers
+   * 2. Append summary message with metadata
+   * 3. Emit delete event for old messages
+   * 4. Emit summary message to frontend
    */
   private async performCompaction(
     summary: string,
-    messages: MuxMessage[],
     metadata: {
       model: string;
       usage?: LanguageModelV2Usage;
       duration?: number;
       providerMetadata?: Record<string, unknown>;
       systemMessageTokens?: number;
-    }
+    },
+    messages: MuxMessage[]
   ): Promise<Result<void, string>> {
-    const usageHistory = collectUsageHistory(messages, undefined);
-
-    const historicalUsage = usageHistory.length > 0 ? sumUsageHistory(usageHistory) : undefined;
-
     // CRITICAL: Delete partial.json BEFORE clearing history
     // This prevents a race condition where:
     // 1. CompactionHandler clears history and appends summary
@@ -169,8 +163,11 @@ export class CompactionHandler {
 
     // Create summary message with metadata.
     // We omit providerMetadata because it contains cacheCreationInputTokens from the
-    // pre-compaction context, which inflates context usage display. The historicalUsage
-    // field preserves full cost accounting from pre-compaction messages.
+    // pre-compaction context, which inflates context usage display.
+    // Note: We no longer store historicalUsage here. Cumulative costs are tracked in
+    // session-usage.json, which is updated on every stream-end. If that file is deleted
+    // or corrupted, pre-compaction costs are lost - this is acceptable since manual
+    // file deletion is out of scope for data recovery.
     const summaryMessage = createMuxMessage(
       `summary-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       "assistant",
@@ -180,7 +177,6 @@ export class CompactionHandler {
         compacted: true,
         model: metadata.model,
         usage: metadata.usage,
-        historicalUsage,
         duration: metadata.duration,
         systemMessageTokens: metadata.systemMessageTokens,
         muxMetadata: { type: "normal" },

@@ -8,7 +8,6 @@
 import type { LanguageModelV2Usage } from "@ai-sdk/provider";
 import { getModelStats } from "./modelStats";
 import type { ChatUsageDisplay } from "./usageAggregator";
-import type { MuxMessage } from "@/common/types/message";
 import { normalizeGatewayModel } from "../ai/models";
 
 /**
@@ -99,46 +98,4 @@ export function createDisplayUsage(
     },
     model, // Include model for display purposes
   };
-}
-
-/**
- * Collect usage history for cost calculation.
- * Uses totalUsage (sum of all steps) for accurate cost reporting.
- */
-export function collectUsageHistory(
-  messages: MuxMessage[],
-  fallbackModel?: string
-): ChatUsageDisplay[] {
-  // Extract usage from assistant messages
-  const usageHistory: ChatUsageDisplay[] = [];
-  let cumulativeHistorical: ChatUsageDisplay | undefined;
-
-  for (const msg of messages) {
-    if (msg.role === "assistant") {
-      // Check for historical usage from compaction summaries
-      // This preserves costs from messages deleted during compaction
-      if (msg.metadata?.historicalUsage) {
-        cumulativeHistorical = msg.metadata.historicalUsage;
-      }
-
-      // Extract current message's usage (total across all steps)
-      if (msg.metadata?.usage) {
-        // Use the model from this specific message (not global)
-        const model = msg.metadata.model ?? fallbackModel ?? "unknown";
-        const usage = createDisplayUsage(msg.metadata.usage, model, msg.metadata.providerMetadata);
-
-        if (usage) {
-          usageHistory.push(usage);
-        }
-      }
-    }
-  }
-
-  // If we have historical usage from a compaction, prepend it to history
-  // This ensures costs from pre-compaction messages are included in totals
-  if (cumulativeHistorical) {
-    usageHistory.unshift(cumulativeHistorical);
-  }
-
-  return usageHistory;
 }
