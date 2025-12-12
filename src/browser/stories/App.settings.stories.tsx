@@ -14,7 +14,8 @@ import { appMeta, AppWithMocks, type AppStory } from "./meta.js";
 import { createWorkspace, groupWorkspacesByProject } from "./mockFactory";
 import { selectWorkspace } from "./storyHelpers";
 import { createMockORPCClient } from "../../../.storybook/mocks/orpc";
-import { within, waitFor, userEvent } from "@storybook/test";
+import { within, userEvent } from "@storybook/test";
+import { getExperimentKey, EXPERIMENT_IDS } from "@/common/constants/experiments";
 
 export default {
   ...appMeta,
@@ -29,10 +30,20 @@ export default {
 function setupSettingsStory(options: {
   providersConfig?: Record<string, { apiKeySet: boolean; baseUrl?: string; models?: string[] }>;
   providersList?: string[];
+  /** Pre-set experiment states in localStorage before render */
+  experiments?: Partial<Record<string, boolean>>;
 }): APIClient {
   const workspaces = [createWorkspace({ id: "ws-1", name: "main", projectName: "my-app" })];
 
   selectWorkspace(workspaces[0]);
+
+  // Pre-set experiment states if provided
+  if (options.experiments) {
+    for (const [experimentId, enabled] of Object.entries(options.experiments)) {
+      const key = getExperimentKey(experimentId as typeof EXPERIMENT_IDS.POST_COMPACTION_CONTEXT);
+      window.localStorage.setItem(key, JSON.stringify(enabled));
+    }
+  }
 
   return createMockORPCClient({
     projects: groupWorkspacesByProject(workspaces),
@@ -45,33 +56,23 @@ function setupSettingsStory(options: {
 /** Open settings modal and optionally navigate to a section */
 async function openSettingsToSection(canvasElement: HTMLElement, section?: string): Promise<void> {
   const canvas = within(canvasElement);
+  // Use ownerDocument.body to scope to iframe, not parent Storybook UI
+  const body = within(canvasElement.ownerDocument.body);
 
   // Wait for app to fully load (sidebar with settings button should appear)
-  // Use longer timeout since app initialization can take time
   const settingsButton = await canvas.findByTestId("settings-button", {}, { timeout: 10000 });
   await userEvent.click(settingsButton);
 
-  // Wait for modal to appear - Radix Dialog uses a portal so we need to search the entire document
-  const body = within(document.body);
-  await waitFor(
-    () => {
-      const modal = body.getByRole("dialog");
-      if (!modal) throw new Error("Settings modal not found");
-    },
-    { timeout: 5000 }
-  );
+  // Wait for dialog to appear (portal renders outside canvasElement but inside iframe body)
+  await body.findByRole("dialog");
 
   // Navigate to specific section if requested
-  // The sidebar nav has buttons with exact section names
   if (section && section !== "general") {
-    const modal = body.getByRole("dialog");
-    const modalCanvas = within(modal);
-    // Find the nav section button (exact text match)
-    const navButtons = await modalCanvas.findAllByRole("button");
-    const sectionButton = navButtons.find(
-      (btn) => btn.textContent?.toLowerCase().trim() === section.toLowerCase()
-    );
-    if (!sectionButton) throw new Error(`Section button "${section}" not found`);
+    // Capitalize first letter to match the button text (e.g., "experiments" -> "Experiments")
+    const sectionLabel = section.charAt(0).toUpperCase() + section.slice(1);
+    const sectionButton = await body.findByRole("button", {
+      name: new RegExp(sectionLabel, "i"),
+    });
     await userEvent.click(sectionButton);
   }
 }
@@ -175,43 +176,27 @@ export const Experiments: AppStory = {
   },
 };
 
-/** Experiments section - toggle experiment on */
+/** Experiments section - shows experiment in ON state (pre-enabled via localStorage) */
 export const ExperimentsToggleOn: AppStory = {
-  render: () => <AppWithMocks setup={() => setupSettingsStory({})} />,
+  render: () => (
+    <AppWithMocks
+      setup={() =>
+        setupSettingsStory({
+          experiments: { [EXPERIMENT_IDS.POST_COMPACTION_CONTEXT]: true },
+        })
+      }
+    />
+  ),
   play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     await openSettingsToSection(canvasElement, "experiments");
-
-    // Find and click the switch to toggle it on
-    const body = within(document.body);
-    const modal = body.getByRole("dialog");
-    const modalCanvas = within(modal);
-
-    // Find the switch by its role - experiments use role="switch"
-    const switches = await modalCanvas.findAllByRole("switch");
-    if (switches.length > 0) {
-      // Toggle the first experiment on
-      await userEvent.click(switches[0]);
-    }
   },
 };
 
-/** Experiments section - toggle experiment off (starts enabled, then toggles off) */
+/** Experiments section - shows experiment in OFF state (default) */
 export const ExperimentsToggleOff: AppStory = {
   render: () => <AppWithMocks setup={() => setupSettingsStory({})} />,
   play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     await openSettingsToSection(canvasElement, "experiments");
-
-    const body = within(document.body);
-    const modal = body.getByRole("dialog");
-    const modalCanvas = within(modal);
-
-    // Find the switch
-    const switches = await modalCanvas.findAllByRole("switch");
-    if (switches.length > 0) {
-      // Toggle on first
-      await userEvent.click(switches[0]);
-      // Then toggle off
-      await userEvent.click(switches[0]);
-    }
+    // Default state is OFF - no clicks needed
   },
 };
