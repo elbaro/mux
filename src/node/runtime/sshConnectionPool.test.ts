@@ -193,7 +193,9 @@ describe("SSHConnectionPool", () => {
       };
 
       // Trigger a failure via acquireConnection (will fail to connect)
-      await expect(pool.acquireConnection(config, 1000)).rejects.toThrow();
+      await expect(
+        pool.acquireConnection(config, { timeoutMs: 1000, maxWaitMs: 0 })
+      ).rejects.toThrow();
 
       // Verify we're now in backoff
       const healthBefore = pool.getConnectionHealth(config);
@@ -231,6 +233,38 @@ describe("SSHConnectionPool", () => {
       expect(elapsed).toBeLessThan(50);
     });
 
+    test("waits through backoff (bounded) instead of throwing", async () => {
+      const pool = new SSHConnectionPool();
+      const config: SSHRuntimeConfig = {
+        host: "test.example.com",
+        srcBaseDir: "/work",
+      };
+
+      // Put host into backoff without doing a real probe.
+      pool.reportFailure(config, "Connection refused");
+      expect(pool.getConnectionHealth(config)?.backoffUntil).toBeDefined();
+
+      const sleepCalls: number[] = [];
+      const onWaitCalls: number[] = [];
+
+      await pool.acquireConnection(config, {
+        onWait: (ms) => {
+          onWaitCalls.push(ms);
+        },
+        sleep: (ms) => {
+          sleepCalls.push(ms);
+          // Simulate time passing / recovery.
+          pool.markHealthy(config);
+          return Promise.resolve();
+        },
+      });
+
+      expect(sleepCalls.length).toBe(1);
+      expect(onWaitCalls.length).toBe(1);
+      expect(sleepCalls[0]).toBeGreaterThan(0);
+      expect(onWaitCalls[0]).toBe(sleepCalls[0]);
+      expect(pool.getConnectionHealth(config)?.status).toBe("healthy");
+    });
     test("throws immediately when in backoff", async () => {
       const pool = new SSHConnectionPool();
       const config: SSHRuntimeConfig = {
@@ -239,10 +273,12 @@ describe("SSHConnectionPool", () => {
       };
 
       // Trigger a failure to put connection in backoff
-      await expect(pool.acquireConnection(config, 1000)).rejects.toThrow();
+      await expect(
+        pool.acquireConnection(config, { timeoutMs: 1000, maxWaitMs: 0 })
+      ).rejects.toThrow();
 
       // Second call should throw immediately with backoff message
-      await expect(pool.acquireConnection(config)).rejects.toThrow(/in backoff/);
+      await expect(pool.acquireConnection(config, { maxWaitMs: 0 })).rejects.toThrow(/in backoff/);
     });
 
     test("getControlPath returns deterministic path", () => {
@@ -270,9 +306,9 @@ describe("SSHConnectionPool", () => {
 
       // All concurrent calls should share the same probe and get same result
       const results = await Promise.allSettled([
-        pool.acquireConnection(config, 1000),
-        pool.acquireConnection(config, 1000),
-        pool.acquireConnection(config, 1000),
+        pool.acquireConnection(config, { timeoutMs: 1000, maxWaitMs: 0 }),
+        pool.acquireConnection(config, { timeoutMs: 1000, maxWaitMs: 0 }),
+        pool.acquireConnection(config, { timeoutMs: 1000, maxWaitMs: 0 }),
       ]);
 
       // All should be rejected (connection fails)

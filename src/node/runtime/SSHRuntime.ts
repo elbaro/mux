@@ -41,6 +41,11 @@ const shescape = {
   },
 };
 
+function logSSHBackoffWait(initLogger: InitLogger, waitMs: number): void {
+  const secs = Math.max(1, Math.ceil(waitMs / 1000));
+  initLogger.logStep(`SSH unavailable; retrying in ${secs}s...`);
+}
+
 // Re-export SSHRuntimeConfig from connection pool (defined there to avoid circular deps)
 export type { SSHRuntimeConfig } from "./sshConnectionPool";
 
@@ -122,9 +127,11 @@ export class SSHRuntime implements Runtime {
       throw new RuntimeErrorClass("Operation aborted before execution", "exec");
     }
 
-    // Ensure connection is healthy before executing
-    // This provides backoff protection and singleflighting for concurrent requests
-    await sshConnectionPool.acquireConnection(this.config);
+    // Ensure connection is healthy before executing.
+    // This provides backoff protection and singleflighting for concurrent requests.
+    await sshConnectionPool.acquireConnection(this.config, {
+      abortSignal: options.abortSignal,
+    });
 
     // Build command parts
     const parts: string[] = [];
@@ -437,7 +444,7 @@ export class SSHRuntime implements Runtime {
    */
   private async execSSHCommand(command: string, timeoutMs: number): Promise<string> {
     // Ensure connection is healthy before executing
-    await sshConnectionPool.acquireConnection(this.config, timeoutMs);
+    await sshConnectionPool.acquireConnection(this.config, { timeoutMs });
 
     const sshArgs = this.buildSSHArgs();
     sshArgs.push(this.config.host, command);
@@ -623,7 +630,13 @@ export class SSHRuntime implements Runtime {
         initLogger.logStderr(`Could not get origin URL: ${getErrorMessage(error)}`);
       }
 
-      // Step 2: Create bundle locally and pipe to remote file via SSH
+      // Step 2: Ensure the SSH host is reachable before doing expensive local work
+      await sshConnectionPool.acquireConnection(this.config, {
+        abortSignal,
+        onWait: (waitMs) => logSSHBackoffWait(initLogger, waitMs),
+      });
+
+      // Step 3: Create bundle locally and pipe to remote file via SSH
       initLogger.logStep(`Creating git bundle...`);
 
       // Ensure SSH connection is established before starting the bundle transfer
@@ -676,7 +689,7 @@ export class SSHRuntime implements Runtime {
         });
       });
 
-      // Step 3: Clone from bundle on remote using this.exec
+      // Step 4: Clone from bundle on remote using this.exec
       initLogger.logStep(`Cloning repository on remote...`);
 
       // Expand tilde in destination path for git clone
@@ -699,7 +712,7 @@ export class SSHRuntime implements Runtime {
         throw new Error(`Failed to clone repository: ${cloneStderr || cloneStdout}`);
       }
 
-      // Step 4: Create local tracking branches for all remote branches
+      // Step 5: Create local tracking branches for all remote branches
       // This ensures that branch names like "custom-trunk" can be used directly
       // in git checkout commands, rather than needing "origin/custom-trunk"
       initLogger.logStep(`Creating local tracking branches...`);
@@ -714,7 +727,7 @@ export class SSHRuntime implements Runtime {
       await createTrackingBranchesStream.exitCode;
       // Don't fail if this fails - some branches may already exist
 
-      // Step 5: Update origin remote if we have an origin URL
+      // Step 6: Update origin remote if we have an origin URL
       if (originUrl) {
         initLogger.logStep(`Setting origin remote to ${originUrl}...`);
         const setOriginStream = await this.exec(
@@ -746,7 +759,7 @@ export class SSHRuntime implements Runtime {
         await removeOriginStream.exitCode;
       }
 
-      // Step 5: Remove bundle file
+      // Step 7: Remove bundle file
       initLogger.logStep(`Cleaning up bundle file...`);
       const rmStream = await this.exec(`rm ${bundleTempPath}`, {
         cwd: "~",
