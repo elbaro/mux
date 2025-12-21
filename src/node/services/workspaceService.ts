@@ -914,6 +914,109 @@ export class WorkspaceService extends EventEmitter {
     }
   }
 
+  /**
+   * Archive a workspace. Archived workspaces are hidden from the main sidebar
+   * but can be viewed on the project page. Safe and reversible.
+   */
+
+  async archive(workspaceId: string): Promise<Result<void>> {
+    try {
+      const workspace = this.config.findWorkspace(workspaceId);
+      if (!workspace) {
+        return Err("Workspace not found");
+      }
+      const { projectPath, workspacePath } = workspace;
+
+      // Archiving removes the workspace from the sidebar; ensure we don't leave a stream running
+      // "headless" with no obvious UI affordance to interrupt it.
+      if (this.aiService.isStreaming(workspaceId)) {
+        const stopResult = await this.interruptStream(workspaceId);
+        if (!stopResult.success) {
+          log.debug("Failed to stop stream during workspace archive", {
+            workspaceId,
+            error: stopResult.error,
+          });
+        }
+      }
+
+      await this.config.editConfig((config) => {
+        const projectConfig = config.projects.get(projectPath);
+        if (projectConfig) {
+          const workspaceEntry =
+            projectConfig.workspaces.find((w) => w.id === workspaceId) ??
+            projectConfig.workspaces.find((w) => w.path === workspacePath);
+          if (workspaceEntry) {
+            // Just set archivedAt - archived state is derived from archivedAt > unarchivedAt
+            workspaceEntry.archivedAt = new Date().toISOString();
+          }
+        }
+        return config;
+      });
+
+      // Emit updated metadata
+      const allMetadata = await this.config.getAllWorkspaceMetadata();
+      const updatedMetadata = allMetadata.find((m) => m.id === workspaceId);
+      if (updatedMetadata) {
+        const session = this.sessions.get(workspaceId);
+        if (session) {
+          session.emitMetadata(updatedMetadata);
+        } else {
+          this.emit("metadata", { workspaceId, metadata: updatedMetadata });
+        }
+      }
+
+      return Ok(undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return Err(`Failed to archive workspace: ${message}`);
+    }
+  }
+
+  /**
+   * Unarchive a workspace. Restores it to the main sidebar view.
+   */
+  async unarchive(workspaceId: string): Promise<Result<void>> {
+    try {
+      const workspace = this.config.findWorkspace(workspaceId);
+      if (!workspace) {
+        return Err("Workspace not found");
+      }
+      const { projectPath, workspacePath } = workspace;
+
+      await this.config.editConfig((config) => {
+        const projectConfig = config.projects.get(projectPath);
+        if (projectConfig) {
+          const workspaceEntry =
+            projectConfig.workspaces.find((w) => w.id === workspaceId) ??
+            projectConfig.workspaces.find((w) => w.path === workspacePath);
+          if (workspaceEntry) {
+            // Just set unarchivedAt - archived state is derived from archivedAt > unarchivedAt
+            // This also bumps workspace to top of recency
+            workspaceEntry.unarchivedAt = new Date().toISOString();
+          }
+        }
+        return config;
+      });
+
+      // Emit updated metadata
+      const allMetadata = await this.config.getAllWorkspaceMetadata();
+      const updatedMetadata = allMetadata.find((m) => m.id === workspaceId);
+      if (updatedMetadata) {
+        const session = this.sessions.get(workspaceId);
+        if (session) {
+          session.emitMetadata(updatedMetadata);
+        } else {
+          this.emit("metadata", { workspaceId, metadata: updatedMetadata });
+        }
+      }
+
+      return Ok(undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return Err(`Failed to unarchive workspace: ${message}`);
+    }
+  }
+
   private normalizeWorkspaceAISettings(
     aiSettings: WorkspaceAISettings
   ): Result<WorkspaceAISettings, string> {

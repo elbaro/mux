@@ -29,6 +29,7 @@ import { useProjectContext } from "@/browser/contexts/ProjectContext";
 import { useWorkspaceStoreRaw } from "@/browser/stores/WorkspaceStore";
 import { isExperimentEnabled } from "@/browser/hooks/useExperiments";
 import { EXPERIMENT_IDS } from "@/common/constants/experiments";
+import { isWorkspaceArchived } from "@/common/utils/archive";
 
 /**
  * Seed per-workspace localStorage from backend workspace metadata.
@@ -108,6 +109,8 @@ export interface WorkspaceContext {
     workspaceId: string,
     newName: string
   ) => Promise<{ success: boolean; error?: string }>;
+  archiveWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
+  unarchiveWorkspace: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
   refreshWorkspaceMetadata: () => Promise<void>;
   setWorkspaceMetadata: React.Dispatch<
     React.SetStateAction<Map<string, FrontendWorkspaceMetadata>>
@@ -183,6 +186,8 @@ export function WorkspaceProvider(props: WorkspaceProviderProps) {
       );
       const metadataMap = new Map<string, FrontendWorkspaceMetadata>();
       for (const metadata of metadataList) {
+        // Skip archived workspaces - they should not be tracked by the app
+        if (isWorkspaceArchived(metadata.archivedAt, metadata.unarchivedAt)) continue;
         ensureCreatedAt(metadata);
         // Use stable workspace ID as key (not path, which can change)
         seedWorkspaceLocalStorageFromBackend(metadata);
@@ -522,6 +527,54 @@ export function WorkspaceProvider(props: WorkspaceProviderProps) {
     [loadWorkspaceMetadata, api]
   );
 
+  const archiveWorkspace = useCallback(
+    async (workspaceId: string): Promise<{ success: boolean; error?: string }> => {
+      if (!api) return { success: false, error: "API not connected" };
+      try {
+        const result = await api.workspace.archive({ workspaceId });
+        if (result.success) {
+          // Reload workspace metadata to get the updated state
+          await loadWorkspaceMetadata();
+          // Clear selected workspace if it was archived
+          setSelectedWorkspace((current) =>
+            current?.workspaceId === workspaceId ? null : current
+          );
+          return { success: true };
+        } else {
+          console.error("Failed to archive workspace:", result.error);
+          return { success: false, error: result.error };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("Failed to archive workspace:", errorMessage);
+        return { success: false, error: errorMessage };
+      }
+    },
+    [loadWorkspaceMetadata, setSelectedWorkspace, api]
+  );
+
+  const unarchiveWorkspace = useCallback(
+    async (workspaceId: string): Promise<{ success: boolean; error?: string }> => {
+      if (!api) return { success: false, error: "API not connected" };
+      try {
+        const result = await api.workspace.unarchive({ workspaceId });
+        if (result.success) {
+          // Reload workspace metadata to get the updated state
+          await loadWorkspaceMetadata();
+          return { success: true };
+        } else {
+          console.error("Failed to unarchive workspace:", result.error);
+          return { success: false, error: result.error };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("Failed to unarchive workspace:", errorMessage);
+        return { success: false, error: errorMessage };
+      }
+    },
+    [loadWorkspaceMetadata, api]
+  );
+
   const refreshWorkspaceMetadata = useCallback(async () => {
     await loadWorkspaceMetadata();
   }, [loadWorkspaceMetadata]);
@@ -558,6 +611,8 @@ export function WorkspaceProvider(props: WorkspaceProviderProps) {
       createWorkspace,
       removeWorkspace,
       renameWorkspace,
+      archiveWorkspace,
+      unarchiveWorkspace,
       refreshWorkspaceMetadata,
       setWorkspaceMetadata,
       selectedWorkspace,
@@ -573,6 +628,8 @@ export function WorkspaceProvider(props: WorkspaceProviderProps) {
       createWorkspace,
       removeWorkspace,
       renameWorkspace,
+      archiveWorkspace,
+      unarchiveWorkspace,
       refreshWorkspaceMetadata,
       setWorkspaceMetadata,
       selectedWorkspace,

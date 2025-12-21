@@ -60,6 +60,14 @@ export const WorkspaceConfigSchema = z.object({
   mcp: WorkspaceMCPOverridesSchema.optional().meta({
     description: "Per-workspace MCP overrides (disabled servers, tool allowlists)",
   }),
+  archivedAt: z.string().optional().meta({
+    description:
+      "ISO 8601 timestamp when workspace was last archived. Workspace is considered archived if archivedAt > unarchivedAt (or unarchivedAt is absent).",
+  }),
+  unarchivedAt: z.string().optional().meta({
+    description:
+      "ISO 8601 timestamp when workspace was last unarchived. Used for recency calculation to bump restored workspaces to top.",
+  }),
 });
 
 export const ProjectConfigSchema = z.object({

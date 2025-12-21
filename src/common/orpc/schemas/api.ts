@@ -219,6 +219,8 @@ export const workspace = {
     input: z
       .object({
         includePostCompaction: z.boolean().optional(),
+        /** When true, only return archived workspaces. Default returns only non-archived. */
+        archived: z.boolean().optional(),
       })
       .optional(),
     output: z.array(FrontendWorkspaceMetadataSchema),
@@ -258,6 +260,14 @@ export const workspace = {
       workspaceId: z.string(),
       aiSettings: WorkspaceAISettingsSchema,
     }),
+    output: ResultSchema(z.void(), z.string()),
+  },
+  archive: {
+    input: z.object({ workspaceId: z.string() }),
+    output: ResultSchema(z.void(), z.string()),
+  },
+  unarchive: {
+    input: z.object({ workspaceId: z.string() }),
     output: ResultSchema(z.void(), z.string()),
   },
   fork: {

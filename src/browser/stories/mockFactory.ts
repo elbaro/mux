@@ -104,6 +104,22 @@ export function createIncompatibleWorkspace(
   };
 }
 
+/** Create an archived workspace (archived = archivedAt set, no unarchivedAt) */
+export function createArchivedWorkspace(
+  opts: Partial<WorkspaceFixture> & {
+    id: string;
+    name: string;
+    projectName: string;
+    archivedAt?: string;
+  }
+): FrontendWorkspaceMetadata {
+  return {
+    ...createWorkspace(opts),
+    archivedAt: opts.archivedAt ?? new Date(NOW - 86400000).toISOString(), // 1 day ago
+    // No unarchivedAt means it's archived (archivedAt > unarchivedAt where unarchivedAt is undefined)
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PROJECT FACTORY
 // ═══════════════════════════════════════════════════════════════════════════════

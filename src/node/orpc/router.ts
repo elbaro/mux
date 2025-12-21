@@ -25,6 +25,7 @@ import {
   normalizeSubagentAiDefaults,
   normalizeTaskSettings,
 } from "@/common/types/tasks";
+import { isWorkspaceArchived } from "@/common/utils/archive";
 
 export const router = (authToken?: string) => {
   const t = os.$context<ORPCContext>().use(createAuthMiddleware(authToken));
@@ -582,8 +583,16 @@ export const router = (authToken?: string) => {
       list: t
         .input(schemas.workspace.list.input)
         .output(schemas.workspace.list.output)
-        .handler(({ context, input }) => {
-          return context.workspaceService.list(input ?? undefined);
+        .handler(async ({ context, input }) => {
+          const allWorkspaces = await context.workspaceService.list({
+            includePostCompaction: input?.includePostCompaction,
+          });
+          // Filter by archived status (derived from timestamps via shared utility)
+          if (input?.archived) {
+            return allWorkspaces.filter((w) => isWorkspaceArchived(w.archivedAt, w.unarchivedAt));
+          }
+          // Default: return non-archived workspaces
+          return allWorkspaces.filter((w) => !isWorkspaceArchived(w.archivedAt, w.unarchivedAt));
         }),
       create: t
         .input(schemas.workspace.create.input)
@@ -631,6 +640,18 @@ export const router = (authToken?: string) => {
         .output(schemas.workspace.updateAISettings.output)
         .handler(async ({ context, input }) => {
           return context.workspaceService.updateAISettings(input.workspaceId, input.aiSettings);
+        }),
+      archive: t
+        .input(schemas.workspace.archive.input)
+        .output(schemas.workspace.archive.output)
+        .handler(async ({ context, input }) => {
+          return context.workspaceService.archive(input.workspaceId);
+        }),
+      unarchive: t
+        .input(schemas.workspace.unarchive.input)
+        .output(schemas.workspace.unarchive.output)
+        .handler(async ({ context, input }) => {
+          return context.workspaceService.unarchive(input.workspaceId);
         }),
       fork: t
         .input(schemas.workspace.fork.input)

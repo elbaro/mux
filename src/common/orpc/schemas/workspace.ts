@@ -64,6 +64,14 @@ export const WorkspaceMetadataSchema = z.object({
     description:
       "Workspace creation status. 'creating' = pending setup (ephemeral, not persisted). Absent = ready.",
   }),
+  archivedAt: z.string().optional().meta({
+    description:
+      "ISO 8601 timestamp when workspace was last archived. Workspace is considered archived if archivedAt > unarchivedAt (or unarchivedAt is absent).",
+  }),
+  unarchivedAt: z.string().optional().meta({
+    description:
+      "ISO 8601 timestamp when workspace was last unarchived. Used for recency calculation to bump restored workspaces to top.",
+  }),
 });
 
 export const FrontendWorkspaceMetadataSchema = WorkspaceMetadataSchema.extend({

@@ -21,6 +21,7 @@ import {
   type TaskSettings,
 } from "@/common/types/tasks";
 import { createAsyncMessageQueue } from "@/common/utils/asyncMessageQueue";
+import { isWorkspaceArchived } from "@/common/utils/archive";
 
 /** Session usage data structure matching SessionUsageFileSchema */
 export interface MockSessionUsage {
@@ -251,7 +252,14 @@ export function createMockORPCClient(options: MockORPCClientOptions = {}): APICl
       },
     },
     workspace: {
-      list: async () => workspaces,
+      list: async (input?: { archived?: boolean }) => {
+        if (input?.archived) {
+          return workspaces.filter((w) => isWorkspaceArchived(w.archivedAt, w.unarchivedAt));
+        }
+        return workspaces.filter((w) => !isWorkspaceArchived(w.archivedAt, w.unarchivedAt));
+      },
+      archive: async () => ({ success: true }),
+      unarchive: async () => ({ success: true }),
       create: async (input: { projectPath: string; branchName: string }) => ({
         success: true,
         metadata: {
