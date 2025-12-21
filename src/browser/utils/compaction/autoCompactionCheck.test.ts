@@ -126,8 +126,9 @@ describe("checkAutoCompaction", () => {
       expect(result.shouldShowWarning).toBe(false);
     });
 
-    test("includes all token types in calculation", () => {
-      // Create usage with all token types specified
+    test("includes cacheCreate in context calculation (prompt caching)", () => {
+      // For Anthropic prompt caching, cacheCreate tokens represent cached prefix tokens.
+      // They are still part of the request's total input tokens and count toward context.
       const usageEntry = {
         input: { tokens: 10_000 },
         cached: { tokens: 5_000 },

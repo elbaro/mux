@@ -64,6 +64,9 @@ export function calculateTokenMeterData(
   const modelStats = getModelStats(model);
   const maxTokens = use1M && supports1MContext(model) ? 1_000_000 : modelStats?.max_input_tokens;
 
+  // Total tokens used in the request.
+  // For Anthropic prompt caching, cacheCreate tokens are reported separately but still
+  // count toward total input tokens for the request.
   const totalUsed =
     usage.input.tokens +
     usage.cached.tokens +
