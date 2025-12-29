@@ -950,6 +950,7 @@ export class StreamingMessageAggregator {
       historySequence: data.historySequence,
       timestamp: Date.now(),
       model: data.model,
+      mode: data.mode,
     });
 
     this.messages.set(data.messageId, streamingMessage);
@@ -1582,6 +1583,7 @@ export class StreamingMessageAggregator {
                 isCompacted: !!message.metadata?.compacted,
                 isIdleCompacted: message.metadata?.compacted === "idle",
                 model: message.metadata?.model,
+                mode: message.metadata?.mode,
                 timestamp: part.timestamp ?? baseTimestamp,
               });
             } else if (isDynamicToolPart(part)) {
