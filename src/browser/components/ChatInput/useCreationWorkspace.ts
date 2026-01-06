@@ -32,6 +32,8 @@ interface UseCreationWorkspaceOptions {
   message: string;
   /** Section ID to assign the new workspace to */
   sectionId?: string | null;
+  /** User's currently selected model (for name generation fallback) */
+  userModel?: string;
 }
 
 function syncCreationPreferences(projectPath: string, workspaceId: string): void {
@@ -118,6 +120,7 @@ export function useCreationWorkspace({
   onWorkspaceCreated,
   message,
   sectionId,
+  userModel,
 }: UseCreationWorkspaceOptions): UseCreationWorkspaceReturn {
   const { api } = useAPI();
   const [branches, setBranches] = useState<string[]>([]);
@@ -141,14 +144,12 @@ export function useCreationWorkspace({
   // Project scope ID for reading send options at send time
   const projectScopeId = getProjectScopeId(projectPath);
 
-  // Read the user's preferred model for fallback (same source as ChatInput's preferredModel)
-  const fallbackModel = readPersistedState<string | null>(getModelKey(projectScopeId), null);
-
   // Workspace name generation with debounce
+  // Backend tries cheap models first, then user's model, then any available
   const workspaceNameState = useWorkspaceName({
     message,
     debounceMs: 500,
-    fallbackModel: fallbackModel ?? undefined,
+    userModel,
   });
 
   // Destructure name state functions for use in callbacks

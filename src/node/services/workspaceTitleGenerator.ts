@@ -6,6 +6,10 @@ import type { Result } from "@/common/types/result";
 import { Ok, Err } from "@/common/types/result";
 import type { SendMessageError } from "@/common/types/errors";
 import crypto from "crypto";
+import { KNOWN_MODELS, getKnownModel } from "@/common/constants/knownModels";
+
+/** Small, fast models preferred for name generation (cheap and quick) */
+const DEFAULT_NAME_GENERATION_MODELS = [getKnownModel("HAIKU").id, getKnownModel("GPT_MINI").id];
 
 /** Schema for AI-generated workspace identity (area name + descriptive title) */
 const workspaceIdentitySchema = z.object({
@@ -46,6 +50,101 @@ export async function findAvailableModel(
       return modelId;
     }
   }
+  return null;
+}
+
+/**
+ * Convert a model ID to a gateway variant (mux-gateway or openrouter).
+ * e.g., toGatewayVariant("anthropic:claude-haiku-4-5", "mux-gateway") -> "mux-gateway:anthropic/claude-haiku-4-5"
+ */
+function toGatewayVariant(modelId: string, gateway: "mux-gateway" | "openrouter"): string {
+  const [provider, model] = modelId.split(":");
+  if (!provider || !model) return modelId;
+  return `${gateway}:${provider}/${model}`;
+}
+
+/**
+ * Select a model for name generation with intelligent fallback.
+ *
+ * Priority order:
+ * 1. Try preferred models (Haiku, GPT-Mini) directly
+ * 2. Try Mux Gateway variants of preferred models
+ * 3. Try OpenRouter variants of preferred models
+ * 4. Try user's selected model (for Ollama/Bedrock/custom providers)
+ * 5. Fallback to any available model from the known models list
+ *
+ * This ensures name generation works with any provider setup:
+ * direct API keys, Mux Gateway (coupon), OpenRouter, or custom providers.
+ *
+ * Note: createModel() validates provider configuration internally,
+ * returning Err({ type: "api_key_not_found" }) for unconfigured providers.
+ * We only use models where createModel succeeds.
+ */
+export async function selectModelForNameGeneration(
+  aiService: Pick<AIService, "createModel">,
+  preferredModels: string[] = DEFAULT_NAME_GENERATION_MODELS,
+  userModel?: string
+): Promise<string | null> {
+  // 1. Try preferred models directly
+  for (const modelId of preferredModels) {
+    const result = await aiService.createModel(modelId);
+    if (result.success) {
+      return modelId;
+    }
+  }
+
+  // 2. Try Mux Gateway variants of preferred models
+  for (const modelId of preferredModels) {
+    const gatewayVariant = toGatewayVariant(modelId, "mux-gateway");
+    const result = await aiService.createModel(gatewayVariant);
+    if (result.success) {
+      return gatewayVariant;
+    }
+  }
+
+  // 3. Try OpenRouter variants of preferred models
+  for (const modelId of preferredModels) {
+    const openRouterVariant = toGatewayVariant(modelId, "openrouter");
+    const result = await aiService.createModel(openRouterVariant);
+    if (result.success) {
+      return openRouterVariant;
+    }
+  }
+
+  // 4. Try user's selected model (supports Ollama, Bedrock, custom providers)
+  if (userModel) {
+    const result = await aiService.createModel(userModel);
+    if (result.success) {
+      return userModel;
+    }
+  }
+
+  // 5. Fallback to any available model from known models
+  // Try each known model directly, then via gateway/OpenRouter
+  const knownModelIds = Object.values(KNOWN_MODELS).map((m) => m.id);
+  for (const modelId of knownModelIds) {
+    // Try direct first
+    const directResult = await aiService.createModel(modelId);
+    if (directResult.success) {
+      return modelId;
+    }
+
+    // Try Mux Gateway variant
+    const gatewayVariant = toGatewayVariant(modelId, "mux-gateway");
+    const gatewayResult = await aiService.createModel(gatewayVariant);
+    if (gatewayResult.success) {
+      return gatewayVariant;
+    }
+
+    // Try OpenRouter variant
+    const openRouterVariant = toGatewayVariant(modelId, "openrouter");
+    const openRouterResult = await aiService.createModel(openRouterVariant);
+    if (openRouterResult.success) {
+      return openRouterVariant;
+    }
+  }
+
+  // No models available at all
   return null;
 }
 
