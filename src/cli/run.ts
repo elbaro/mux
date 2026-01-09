@@ -37,9 +37,17 @@ import {
   isToolCallDelta,
   isToolCallEnd,
   isToolCallStart,
+  isUsageDelta,
   type SendMessageOptions,
   type WorkspaceChatMessage,
 } from "@/common/orpc/types";
+import { createDisplayUsage } from "@/common/utils/tokens/displayUsage";
+import {
+  getTotalCost,
+  formatCostWithDollar,
+  sumUsageHistory,
+  type ChatUsageDisplay,
+} from "@/common/utils/tokens/usageAggregator";
 import {
   formatToolStart,
   formatToolEnd,
@@ -55,14 +63,6 @@ import type { RuntimeConfig } from "@/common/types/runtime";
 import { parseRuntimeModeAndHost, RUNTIME_MODE } from "@/common/types/runtime";
 import assert from "@/common/utils/assert";
 import type { LanguageModelV2Usage } from "@ai-sdk/provider";
-import { createDisplayUsage } from "@/common/utils/tokens/displayUsage";
-import {
-  getTotalCost,
-  formatCostWithDollar,
-  sumUsageHistory,
-  type ChatUsageDisplay,
-} from "@/common/utils/tokens/usageAggregator";
-import { isUsageDelta } from "@/common/orpc/types";
 import { log, type LogLevel } from "@/node/services/log";
 import chalk from "chalk";
 import type { InitLogger } from "@/node/runtime/Runtime";
@@ -248,6 +248,7 @@ program
   .option("--mcp <server>", "MCP server as name=command (can be repeated)", collectMcpServers, [])
   .option("--no-mcp-config", "ignore .mux/mcp.jsonc, use only --mcp servers")
   .option("-e, --experiment <id>", "enable experiment (can be repeated)", collectExperiments, [])
+  .option("-b, --budget <usd>", "stop when session cost exceeds budget (USD)", parseFloat)
   .addHelpText(
     "after",
     `
@@ -256,6 +257,7 @@ Examples:
   $ mux run --dir /path/to/project "Add authentication"
   $ mux run --runtime "ssh user@host" "Deploy changes"
   $ mux run --mode plan "Refactor the auth module"
+  $ mux run --budget 1.50 "Quick code review"
   $ echo "Add logging" | mux run
   $ mux run --json "List all files" | jq '.type'
   $ mux run --mcp "memory=npx -y @modelcontextprotocol/server-memory" "Remember this"
@@ -279,6 +281,7 @@ interface CLIOptions {
   mcp: MCPServerEntry[];
   mcpConfig: boolean;
   experiment: string[];
+  budget?: number;
 }
 
 const opts = program.opts<CLIOptions>();
@@ -342,6 +345,20 @@ async function main(): Promise<number> {
   const emitJson = opts.json === true;
   const quiet = opts.quiet === true;
   const hideCosts = opts.hideCosts === true;
+
+  const budget = opts.budget;
+
+  // Validate budget
+  if (budget !== undefined) {
+    if (Number.isNaN(budget)) {
+      console.error("Error: --budget must be a valid number");
+      process.exit(1);
+    }
+    if (budget < 0) {
+      console.error("Error: --budget cannot be negative");
+      process.exit(1);
+    }
+  }
 
   const suppressHumanOutput = emitJson || quiet;
   const stdoutIsTTY = process.stdout.isTTY === true;
@@ -558,6 +575,9 @@ async function main(): Promise<number> {
   // Track tool call args by toolCallId for use in end formatting
   const toolCallArgs = new Map<string, unknown>();
 
+  // Budget tracking state
+  let budgetExceeded = false;
+
   // Centralized output type tracking for spacing
   type OutputType = "none" | "text" | "thinking" | "tool";
   let lastOutputType: OutputType = "none";
@@ -765,7 +785,12 @@ async function main(): Promise<number> {
     }
 
     if (isStreamAbort(payload)) {
-      rejectStream(new Error("Stream aborted before completion"));
+      // Don't treat budget-triggered abort as an error
+      if (budgetExceeded) {
+        resolveStream();
+      } else {
+        rejectStream(new Error("Stream aborted before completion"));
+      }
       return;
     }
 
@@ -800,6 +825,40 @@ async function main(): Promise<number> {
       }
       if (displayUsage) {
         usageHistory.push(displayUsage);
+
+        // Budget enforcement at stream-end for providers that don't emit usage-delta events
+        // Use cumulative cost across all messages in this run (not just the current message)
+        if (budget !== undefined && !budgetExceeded) {
+          const totalUsage = sumUsageHistory(usageHistory);
+          const cost = getTotalCost(totalUsage);
+          const hasTokens = totalUsage
+            ? totalUsage.input.tokens +
+                totalUsage.output.tokens +
+                totalUsage.cached.tokens +
+                totalUsage.cacheCreate.tokens +
+                totalUsage.reasoning.tokens >
+              0
+            : false;
+
+          if (hasTokens && cost === undefined) {
+            const errMsg = `Cannot enforce budget: unknown pricing for model "${payload.metadata.model ?? model}"`;
+            emitJsonLine({
+              type: "budget-error",
+              error: errMsg,
+              model: payload.metadata.model ?? model,
+            });
+            rejectStream(new Error(errMsg));
+            return;
+          }
+
+          if (cost !== undefined && cost > budget) {
+            budgetExceeded = true;
+            const msg = `Budget exceeded ($${cost.toFixed(2)} of $${budget.toFixed(2)}) - stopping`;
+            emitJsonLine({ type: "budget-exceeded", spent: cost, budget });
+            writeHumanLineClosed(`\n${chalk.yellow(msg)}`);
+            // Don't interrupt - stream is already ending
+          }
+        }
       }
       latestUsageDelta.delete(payload.messageId);
 
@@ -808,12 +867,50 @@ async function main(): Promise<number> {
     }
 
     // Capture usage-delta events as fallback when stream-end lacks usage metadata
+    // Also check budget limits if --budget is specified
     if (isUsageDelta(payload)) {
       latestUsageDelta.set(payload.messageId, {
         usage: payload.cumulativeUsage,
         providerMetadata: payload.cumulativeProviderMetadata,
         model, // Use the model from CLI options
       });
+
+      // Budget enforcement
+      if (budget !== undefined) {
+        const displayUsage = createDisplayUsage(
+          payload.cumulativeUsage,
+          model,
+          payload.cumulativeProviderMetadata
+        );
+
+        const cost = getTotalCost(displayUsage);
+
+        // Reject if model has unknown pricing: displayUsage exists with tokens but cost is undefined
+        // (createDisplayUsage doesn't set hasUnknownCosts; that's only set by sumUsageHistory)
+        // Include all token types: input, output, cached, cacheCreate, and reasoning
+        const hasTokens =
+          displayUsage &&
+          displayUsage.input.tokens +
+            displayUsage.output.tokens +
+            displayUsage.cached.tokens +
+            displayUsage.cacheCreate.tokens +
+            displayUsage.reasoning.tokens >
+            0;
+        if (hasTokens && cost === undefined) {
+          const errMsg = `Cannot enforce budget: unknown pricing for model "${model}"`;
+          emitJsonLine({ type: "budget-error", error: errMsg, model });
+          rejectStream(new Error(errMsg));
+          return;
+        }
+
+        if (cost !== undefined && cost > budget) {
+          budgetExceeded = true;
+          const msg = `Budget exceeded ($${cost.toFixed(2)} of $${budget.toFixed(2)}) - stopping`;
+          emitJsonLine({ type: "budget-exceeded", spent: cost, budget });
+          writeHumanLineClosed(`\n${chalk.yellow(msg)}`);
+          void session.interruptStream({ abandonPartial: false });
+        }
+      }
       return;
     }
   };
@@ -823,14 +920,21 @@ async function main(): Promise<number> {
   try {
     await sendAndAwait(message, buildSendOptions(initialMode));
 
-    const planWasProposed = planProposed;
-    planProposed = false;
-    if (initialMode === "plan" && !planWasProposed) {
-      throw new Error("Plan mode was requested, but the assistant never proposed a plan.");
-    }
-    if (planWasProposed) {
-      writeHumanLineClosed("\n[auto] Plan received. Approving and switching to execute mode...\n");
-      await sendAndAwait("Plan approved. Execute it.", buildSendOptions("exec"));
+    // Stop if budget was exceeded during first message
+    if (budgetExceeded) {
+      // Skip plan auto-approval and any follow-up work
+    } else {
+      const planWasProposed = planProposed;
+      planProposed = false;
+      if (initialMode === "plan" && !planWasProposed) {
+        throw new Error("Plan mode was requested, but the assistant never proposed a plan.");
+      }
+      if (planWasProposed) {
+        writeHumanLineClosed(
+          "\n[auto] Plan received. Approving and switching to execute mode...\n"
+        );
+        await sendAndAwait("Plan approved. Execute it.", buildSendOptions("exec"));
+      }
     }
 
     // Output final result for --quiet mode
@@ -870,7 +974,8 @@ async function main(): Promise<number> {
     mcpServerManager.dispose();
   }
 
-  // Return agent-specified exit code, or 0 for success
+  // Exit codes: 2 for budget exceeded, agent-specified exit code, or 0 for success
+  if (budgetExceeded) return 2;
   return agentExitCode ?? 0;
 }
 
