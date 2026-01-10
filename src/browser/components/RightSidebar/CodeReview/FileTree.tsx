@@ -3,10 +3,12 @@
  */
 
 import React from "react";
-import type { FileTreeNode } from "@/common/utils/git/numstatParser";
+import { extractNewPath, type FileTreeNode } from "@/common/utils/git/numstatParser";
+import type { FileChangeType } from "@/common/types/review";
 import { usePersistedState } from "@/browser/hooks/usePersistedState";
 import { getFileTreeExpandStateKey } from "@/common/constants/storage";
 import { cn } from "@/common/lib/utils";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/browser/components/ui/tooltip";
 import { FileIcon } from "@/browser/components/FileIcon";
 
 /**
@@ -30,9 +32,13 @@ function computeDirectoryReadStatus(
     } else {
       // Check file status
       fileCount++;
-      const status = getFileReadStatus(n.path);
+      const status = getFileReadStatus(extractNewPath(n.path));
       if (status === null) {
-        hasUnknown = true;
+        // Some diff entries (renames, binary changes, mode-only edits) have no hunks.
+        // Only treat this as "unknown" when numstat indicates there's actual +/− content.
+        if ((n.stats?.additions ?? 0) > 0 || (n.stats?.deletions ?? 0) > 0) {
+          hasUnknown = true;
+        }
       } else if (status.read === status.total && status.total > 0) {
         fullyReadCount++;
       }
@@ -49,6 +55,34 @@ function computeDirectoryReadStatus(
 
   // Otherwise, directory has partial/no read state
   return null;
+}
+
+function getFileChangeBadge(
+  changeType: FileChangeType,
+  oldPath?: string
+): {
+  label: string;
+  className: string;
+  title: string;
+} {
+  switch (changeType) {
+    case "added":
+      return { label: "A", className: "text-success-light", title: "Added" };
+    case "deleted":
+      return { label: "D", className: "text-danger", title: "Deleted" };
+    case "renamed":
+      return {
+        label: "R",
+        className: "text-muted",
+        title: oldPath ? `Renamed from ${oldPath}` : "Renamed",
+      };
+    case "modified":
+      return {
+        label: "M",
+        className: "text-warning-light",
+        title: "Modified",
+      };
+  }
 }
 
 const TreeNodeContent: React.FC<{
@@ -107,9 +141,15 @@ const TreeNodeContent: React.FC<{
     setIsOpen(!isOpen);
   };
 
-  const fallbackFileName = node.path.split("/").pop() ?? "";
-  const fileNameForIcon = node.name && node.name.length > 0 ? node.name : fallbackFileName;
+  const canonicalFilePath = node.isDirectory ? node.path : extractNewPath(node.path);
+  const fallbackFileName = canonicalFilePath.split("/").pop() ?? "";
+  const fileNameForIcon = fallbackFileName;
   const isSelected = selectedPath === node.path;
+
+  const changeType = !node.isDirectory ? (node.stats?.changeType ?? "modified") : null;
+  const isDeletedFile = changeType === "deleted";
+  const isRenamedFile = changeType === "renamed" && !!node.stats?.oldPath;
+  const oldFileName = node.stats?.oldPath?.split("/").pop() ?? node.stats?.oldPath ?? "";
 
   // Compute read status for files and directories
   let isFullyRead = false;
@@ -120,12 +160,21 @@ const TreeNodeContent: React.FC<{
     isFullyRead = dirStatus === "fully-read";
     isUnknownState = dirStatus === "unknown";
   } else if (getFileReadStatus) {
-    const readStatus = getFileReadStatus(node.path);
+    const readStatus = getFileReadStatus(canonicalFilePath);
     isFullyRead = readStatus ? readStatus.read === readStatus.total && readStatus.total > 0 : false;
-    isUnknownState = readStatus === null;
+
+    // Some diff entries (renames, binary changes, mode-only edits) have no hunks.
+    // Only treat this as "unknown" when numstat indicates there's actual +/− content.
+    isUnknownState =
+      readStatus === null && ((node.stats?.additions ?? 0) > 0 || (node.stats?.deletions ?? 0) > 0);
   }
 
   const iconOpacity = isFullyRead ? 0.45 : isUnknownState && !isFullyRead ? 0.7 : 1;
+
+  const fileChangeBadge =
+    !node.isDirectory && node.stats
+      ? getFileChangeBadge(node.stats.changeType ?? "modified", node.stats.oldPath)
+      : null;
 
   return (
     <>
@@ -190,24 +239,46 @@ const TreeNodeContent: React.FC<{
             <span
               className={cn(
                 "flex-1",
+                isDeletedFile && "line-through",
                 isFullyRead &&
                   "text-dim line-through [text-decoration-color:var(--color-read)] [text-decoration-thickness:2px]",
                 isUnknownState && !isFullyRead && "text-dim",
                 !isFullyRead && !isUnknownState && "text-foreground"
               )}
             >
-              {node.name}
+              {isRenamedFile ? (
+                <>
+                  <span className="text-muted">{oldFileName}</span>
+                  <span className="text-muted">{" -> "}</span>
+                  <span>{fallbackFileName}</span>
+                </>
+              ) : (
+                node.name
+              )}
             </span>
-            {node.stats && (
-              <span className="flex gap-2 text-[11px]">
-                {node.stats.additions > 0 && (
-                  <span className="text-success-light">+{node.stats.additions}</span>
-                )}
-                {node.stats.deletions > 0 && (
-                  <span className="text-warning-light">-{node.stats.deletions}</span>
-                )}
-              </span>
-            )}
+            <span className="ml-auto flex items-center gap-2 text-[11px]">
+              {node.stats?.additions ? (
+                <span className="text-success-light">+{node.stats.additions}</span>
+              ) : null}
+              {node.stats?.deletions ? (
+                <span className="text-warning-light">-{node.stats.deletions}</span>
+              ) : null}
+              {fileChangeBadge ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className={cn("shrink-0 font-semibold", fileChangeBadge.className)}
+                      style={{ opacity: iconOpacity }}
+                    >
+                      {fileChangeBadge.label}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="left" align="center">
+                    {fileChangeBadge.title}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+            </span>
           </>
         )}
       </div>

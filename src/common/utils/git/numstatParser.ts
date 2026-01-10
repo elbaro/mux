@@ -2,11 +2,14 @@
  * Parse git diff --numstat output
  * Format: <additions>\t<deletions>\t<filepath>
  */
+import type { FileChangeType } from "@/common/types/review";
 
 export interface FileStats {
   filePath: string;
   additions: number;
   deletions: number;
+  changeType?: FileChangeType;
+  oldPath?: string;
 }
 
 /**
@@ -52,6 +55,13 @@ export function extractNewPath(filePath: string): string {
     const [, prefix = "", newName, suffix = ""] = renameMatch;
     return `${prefix}${newName}${suffix}`;
   }
+
+  // Match rename syntax without braces: "old => new"
+  const arrowSeparator = " => ";
+  if (filePath.includes(arrowSeparator)) {
+    return filePath.split(arrowSeparator).pop() ?? filePath;
+  }
+
   return filePath;
 }
 
