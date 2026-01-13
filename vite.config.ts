@@ -12,7 +12,64 @@ const disableMermaid = process.env.VITE_DISABLE_MERMAID === "1";
 // Vite server configuration (for dev-server remote access)
 const devServerHost = process.env.MUX_VITE_HOST ?? "127.0.0.1"; // Secure by default
 const devServerPort = Number(process.env.MUX_VITE_PORT ?? "5173");
+
+const devServerAllowedHosts = (() => {
+  const raw = process.env.MUX_VITE_ALLOWED_HOSTS?.trim();
+  if (raw) {
+    if (raw === "true" || raw === "all") {
+      return true;
+    }
+
+    const parsed = raw
+      .split(",")
+      .map((host) => host.trim())
+      .filter(Boolean);
+
+    return parsed.length ? parsed : ["localhost", "127.0.0.1"];
+  }
+
+  // Default to localhost-only. For remote access, set MUX_VITE_ALLOWED_HOSTS (or
+  // the Makefile's VITE_ALLOWED_HOSTS).
+  const defaults = ["localhost", "127.0.0.1"];
+
+  // If the dev server is bound to a specific host (not a wildcard), include it so
+  // access works without extra configuration.
+  if (
+    devServerHost !== "127.0.0.1" &&
+    devServerHost !== "localhost" &&
+    devServerHost !== "0.0.0.0" &&
+    devServerHost !== "::"
+  ) {
+    defaults.push(devServerHost);
+  }
+
+  return defaults;
+})();
+
 const previewPort = Number(process.env.MUX_VITE_PREVIEW_PORT ?? "4173");
+
+function formatHostForUrl(host: string): string {
+  const trimmed = host.trim();
+  const unbracketed =
+    trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
+
+  // IPv6 URLs must be bracketed: http://[::1]:1234
+  if (unbracketed.includes(":")) {
+    // If the host contains a zone index (e.g. fe80::1%en0), percent must be encoded.
+    // Encode zone indices (including numeric ones like %12) while avoiding double-encoding
+    // if the user already provided a URL-safe %25.
+    const escaped = unbracketed.replace(/%(?!25)/gi, "%25");
+    return `[${escaped}]`;
+  }
+
+  return unbracketed;
+}
+
+// In dev-server mode we run the backend on a separate local port, but we want the
+// browser UI to talk to it via same-origin paths (single public port).
+const backendProxyHost = process.env.MUX_BACKEND_HOST ?? "127.0.0.1";
+const backendProxyPort = Number(process.env.MUX_BACKEND_PORT ?? "3000");
+const backendProxyTarget = `http://${formatHostForUrl(backendProxyHost)}:${backendProxyPort}`;
 
 const alias: Record<string, string> = {
   "@": path.resolve(__dirname, "./src"),
@@ -89,7 +146,33 @@ export default defineConfig(({ mode }) => ({
     host: devServerHost, // Configurable via MUX_VITE_HOST (defaults to 127.0.0.1 for security)
     port: devServerPort,
     strictPort: true,
-    allowedHosts: true, // Allow all hosts for dev server (secure by default via MUX_VITE_HOST)
+    allowedHosts: devServerAllowedHosts,
+
+    proxy: {
+      "/orpc": {
+        target: backendProxyTarget,
+        changeOrigin: true,
+        ws: true,
+      },
+      "/api": {
+        target: backendProxyTarget,
+        changeOrigin: true,
+      },
+      "/auth": {
+        target: backendProxyTarget,
+        // Preserve the original Host so mux can generate OAuth redirect URLs that
+        // point back to the public dev-server origin (not 127.0.0.1:3000).
+        changeOrigin: false,
+      },
+      "/health": {
+        target: backendProxyTarget,
+        changeOrigin: true,
+      },
+      "/version": {
+        target: backendProxyTarget,
+        changeOrigin: true,
+      },
+    },
     sourcemapIgnoreList: () => false, // Show all sources in DevTools
 
     watch: {
@@ -115,12 +198,8 @@ export default defineConfig(({ mode }) => ({
       }),
     },
 
-    hmr: {
-      // Configure HMR to use the correct host for remote access
-      host: devServerHost,
-      port: devServerPort,
-      protocol: "ws",
-    },
+    // Note: leave `server.hmr` unset so Vite derives the websocket URL from the
+    // served script URL (works when accessed via reverse proxy / custom domain).
   },
   preview: {
     host: "127.0.0.1",
