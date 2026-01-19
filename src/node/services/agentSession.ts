@@ -46,7 +46,7 @@ import type { TodoItem } from "@/common/types/tools";
 import type { PostCompactionAttachment, PostCompactionExclusions } from "@/common/types/attachment";
 import { TURNS_BETWEEN_ATTACHMENTS } from "@/common/constants/attachments";
 import { extractEditedFileDiffs } from "@/common/utils/messages/extractEditedFiles";
-import { getModelName, getModelProvider, isValidModelFormat } from "@/common/utils/ai/models";
+import { normalizeGatewayModel, isValidModelFormat } from "@/common/utils/ai/models";
 import { readAgentSkill } from "@/node/services/agentSkills/agentSkillsService";
 import { materializeFileAtMentions } from "@/node/services/fileAtMentions";
 
@@ -876,11 +876,43 @@ export class AgentSession {
     }
   }
 
+  private isSonnet45Model(modelString: string): boolean {
+    const normalized = normalizeGatewayModel(modelString);
+    const [provider, modelName] = normalized.split(":", 2);
+    return provider === "anthropic" && modelName?.toLowerCase().startsWith("claude-sonnet-4-5");
+  }
+
+  private withAnthropic1MContext(
+    modelString: string,
+    options: SendMessageOptions | undefined
+  ): SendMessageOptions {
+    if (options) {
+      return {
+        ...options,
+        providerOptions: {
+          ...options.providerOptions,
+          anthropic: {
+            ...options.providerOptions?.anthropic,
+            use1MContext: true,
+          },
+        },
+      };
+    }
+
+    return {
+      model: modelString,
+      providerOptions: {
+        anthropic: {
+          use1MContext: true,
+        },
+      },
+    };
+  }
+
   private isGptClassModel(modelString: string): boolean {
-    return (
-      getModelProvider(modelString) === "openai" &&
-      getModelName(modelString).toLowerCase().startsWith("gpt-")
-    );
+    const normalized = normalizeGatewayModel(modelString);
+    const [provider, modelName] = normalized.split(":", 2);
+    return provider === "openai" && modelName?.toLowerCase().startsWith("gpt-");
   }
 
   private async maybeRetryCompactionOnContextExceeded(data: {
@@ -896,8 +928,18 @@ export class AgentSession {
       return false;
     }
 
-    if (!this.isGptClassModel(context.modelString)) {
+    const isGptClass = this.isGptClassModel(context.modelString);
+    const isSonnet45 = this.isSonnet45Model(context.modelString);
+
+    if (!isGptClass && !isSonnet45) {
       return false;
+    }
+
+    if (isSonnet45) {
+      const use1MContext = context.options?.providerOptions?.anthropic?.use1MContext ?? false;
+      if (use1MContext) {
+        return false;
+      }
     }
 
     if (this.compactionRetryAttempts.has(context.id)) {
@@ -906,7 +948,8 @@ export class AgentSession {
 
     this.compactionRetryAttempts.add(context.id);
 
-    log.info("Compaction hit context limit; retrying once with OpenAI truncation", {
+    const retryLabel = isSonnet45 ? "Anthropic 1M context" : "OpenAI truncation";
+    log.info(`Compaction hit context limit; retrying once with ${retryLabel}`, {
       workspaceId: this.workspaceId,
       model: context.modelString,
       compactionRequestId: context.id,
@@ -914,7 +957,14 @@ export class AgentSession {
 
     await this.finalizeCompactionRetry(data.messageId);
 
-    const retryResult = await this.streamWithHistory(context.modelString, context.options, "auto");
+    const retryOptions = isSonnet45
+      ? this.withAnthropic1MContext(context.modelString, context.options)
+      : context.options;
+    const retryResult = await this.streamWithHistory(
+      context.modelString,
+      retryOptions,
+      isGptClass ? "auto" : undefined
+    );
     if (!retryResult.success) {
       log.error("Compaction retry failed to start", {
         workspaceId: this.workspaceId,
