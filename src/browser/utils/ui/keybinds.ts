@@ -89,8 +89,10 @@ export function matchesKeybind(
   if (ctrlRequired && !ctrlPressed) return false;
   if (!ctrlAllowed && ctrlPressed) return false;
 
+  const allowShift = keybind.allowShift ?? false;
+
   if (keybind.shift && !event.shiftKey) return false;
-  if (!keybind.shift && event.shiftKey) return false;
+  if (!keybind.shift && !allowShift && event.shiftKey) return false;
 
   if (keybind.alt && !event.altKey) return false;
   if (!keybind.alt && event.altKey) return false;
@@ -299,6 +301,10 @@ export const KEYBINDS = {
   /** Focus search input in Code Review panel */
   // macOS: Cmd+F, Win/Linux: Ctrl+F
   FOCUS_REVIEW_SEARCH: { key: "f", ctrl: true },
+
+  /** Focus search input in Code Review panel (quick) */
+  // GitHub-style: / to focus search
+  FOCUS_REVIEW_SEARCH_QUICK: { key: "/", allowShift: true },
 
   /** Mark selected hunk as read/unread in Code Review panel */
   TOGGLE_HUNK_READ: { key: "m" },
