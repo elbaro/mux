@@ -111,6 +111,14 @@ Results are saved to `runs/YYYY-MM-DD__HH-MM-SS/`:
 
 ## CI/CD Integration
 
+## Querying Results from BigQuery
+
+Mux Terminal-Bench results are uploaded to BigQuery after CI runs. Query via `bq` CLI after authenticating with `gcloud auth login` and setting project to `mux-benchmarks`.
+
+**Table:** `mux-benchmarks.benchmarks.tbench_results`
+
+**Schema:** `run_id` (STRING), `task_id` (STRING), `model_name` (STRING), `thinking_level` (STRING: off/low/medium/high), `mode` (STRING: plan/exec), `dataset` (STRING), `experiments` (STRING), `passed` (BOOL), `score` (FLOAT), `n_input_tokens` (INT), `n_output_tokens` (INT), `github_run_id` (INT), `github_sha` (STRING), `ingested_at` (TIMESTAMP).
+
 See `.github/workflows/terminal-bench.yml` and `.github/workflows/nightly-terminal-bench.yml` for GitHub Actions integration.
 
 **Nightly workflow** runs both Claude and GPT models on the full task suite, uploading results as artifacts.
@@ -175,3 +183,53 @@ The PR will be automatically validated by the leaderboard bot. Once merged, resu
 - `mux_payload.py`: Helper to package mux app for containerized execution
 - `mux_setup.sh.j2`: Jinja2 template for agent installation script
 - `prepare_leaderboard_submission.py`: Script to prepare results for leaderboard submission
+- `analyze_failure_rates.py`: Analyze failure rates to find optimization opportunities (see below)
+
+## Analyzing Failure Rates
+
+To identify where Mux underperforms relative to other top agents, use the analysis script:
+
+```bash
+# Run analysis (requires bq CLI for Mux results, git for leaderboard data)
+python benchmarks/terminal_bench/analyze_failure_rates.py
+
+# Show more results
+python benchmarks/terminal_bench/analyze_failure_rates.py --top 50
+
+# Filter to specific Mux model
+python benchmarks/terminal_bench/analyze_failure_rates.py --mux-model sonnet
+
+# Force refresh of cached data
+python benchmarks/terminal_bench/analyze_failure_rates.py --refresh
+
+# Output as JSON for further processing
+python benchmarks/terminal_bench/analyze_failure_rates.py --json > opportunities.json
+```
+
+The script computes the **M/O ratio** for each task:
+
+```
+M/O ratio = Mux failure rate / Average failure rate of top 10 agents
+```
+
+Tasks with **high M/O ratio** are where Mux underperforms relative to competitors—these represent the best optimization opportunities.
+
+Example output:
+
+```
+================================================================================
+OPTIMIZATION OPPORTUNITIES (sorted by M/O ratio)
+================================================================================
+Task ID                                   Mux Fail%  Avg Other%  M/O Ratio Agent
+--------------------------------------------------------------------------------
+some-difficult-task                         100.0%       10.0%       9.09 Mux__Claude-Sonnet-4.5
+another-task                                 80.0%       20.0%       3.64 Mux__Claude-Sonnet-4.5
+...
+
+================================================================================
+SUMMARY
+================================================================================
+Total tasks with Mux failures: 42
+  High priority (M/O > 2.0):   12
+  Medium priority (1.0 < M/O ≤ 2.0): 8
+```
