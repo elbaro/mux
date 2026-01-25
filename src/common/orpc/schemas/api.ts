@@ -954,6 +954,11 @@ export const config = {
       taskSettings: z.object({
         maxParallelAgentTasks: z.number().int(),
         maxTaskNestingDepth: z.number().int(),
+        bashOutputCompactionMinLines: z.number().int().optional(),
+        bashOutputCompactionMinTotalBytes: z.number().int().optional(),
+        bashOutputCompactionMaxKeptLines: z.number().int().optional(),
+        bashOutputCompactionTimeoutMs: z.number().int().optional(),
+        bashOutputCompactionHeuristicFallback: z.boolean().optional(),
       }),
       muxGatewayEnabled: z.boolean().optional(),
       muxGatewayModels: z.array(z.string()).optional(),
@@ -968,6 +973,11 @@ export const config = {
       taskSettings: z.object({
         maxParallelAgentTasks: z.number().int(),
         maxTaskNestingDepth: z.number().int(),
+        bashOutputCompactionMinLines: z.number().int().optional(),
+        bashOutputCompactionMinTotalBytes: z.number().int().optional(),
+        bashOutputCompactionMaxKeptLines: z.number().int().optional(),
+        bashOutputCompactionTimeoutMs: z.number().int().optional(),
+        bashOutputCompactionHeuristicFallback: z.boolean().optional(),
       }),
       agentAiDefaults: AgentAiDefaultsSchema.optional(),
       // Legacy field (downgrade compatibility)

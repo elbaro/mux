@@ -4,10 +4,14 @@ import { useAgent } from "@/browser/contexts/AgentContext";
 import { usePersistedState } from "./usePersistedState";
 import { getDefaultModel } from "./useModelsFromSettings";
 import { migrateGatewayModel, useGateway, isProviderSupported } from "./useGatewayModels";
-import { getModelKey } from "@/common/constants/storage";
+import {
+  getModelKey,
+  PREFERRED_SYSTEM_1_MODEL_KEY,
+  PREFERRED_SYSTEM_1_THINKING_LEVEL_KEY,
+} from "@/common/constants/storage";
 import type { SendMessageOptions } from "@/common/orpc/types";
 import type { UIMode } from "@/common/types/mode";
-import type { ThinkingLevel } from "@/common/types/thinking";
+import { coerceThinkingLevel, type ThinkingLevel } from "@/common/types/thinking";
 import type { MuxProviderOptions } from "@/common/types/providerOptions";
 import { getSendOptionsFromStorage } from "@/browser/utils/messages/sendOptions";
 import { useProviderOptions } from "./useProviderOptions";
@@ -37,6 +41,7 @@ interface ExperimentValues {
   postCompactionContext: boolean | undefined;
   programmaticToolCalling: boolean | undefined;
   programmaticToolCallingExclusive: boolean | undefined;
+  system1: boolean | undefined;
 }
 
 /**
@@ -53,7 +58,9 @@ function constructSendMessageOptions(
   providerOptions: MuxProviderOptions,
   fallbackModel: string,
   gateway: GatewayState,
-  experimentValues: ExperimentValues
+  experimentValues: ExperimentValues,
+  system1Model: string | undefined,
+  system1ThinkingLevel: ThinkingLevel | undefined
 ): SendMessageOptions {
   // Ensure model is always a valid string (defensive against corrupted localStorage)
   const rawModel =
@@ -68,9 +75,23 @@ function constructSendMessageOptions(
   // Transform to gateway format if gateway is enabled for this model (reactive)
   const model = applyGatewayTransform(baseModel, gateway);
 
+  const system1ModelForBackend =
+    system1Model !== undefined
+      ? applyGatewayTransform(migrateGatewayModel(system1Model), gateway)
+      : undefined;
+
+  const system1ThinkingLevelForBackend =
+    system1ThinkingLevel !== undefined && system1ThinkingLevel !== "off"
+      ? system1ThinkingLevel
+      : undefined;
+
   return {
     thinkingLevel: uiThinking,
     model,
+    ...(system1ModelForBackend ? { system1Model: system1ModelForBackend } : {}),
+    ...(system1ThinkingLevelForBackend
+      ? { system1ThinkingLevel: system1ThinkingLevelForBackend }
+      : {}),
     agentId,
     mode: mode === "exec" || mode === "plan" ? mode : "exec", // Only pass exec/plan to backend
     // toolPolicy is computed by backend from agent definitions (resolveToolPolicyForAgent)
@@ -79,6 +100,7 @@ function constructSendMessageOptions(
       postCompactionContext: experimentValues.postCompactionContext,
       programmaticToolCalling: experimentValues.programmaticToolCalling,
       programmaticToolCallingExclusive: experimentValues.programmaticToolCallingExclusive,
+      system1: experimentValues.system1,
     },
   };
 }
@@ -129,6 +151,24 @@ export function useSendMessageOptions(workspaceId: string): SendMessageOptionsWi
   const programmaticToolCallingExclusive = useExperimentOverrideValue(
     EXPERIMENT_IDS.PROGRAMMATIC_TOOL_CALLING_EXCLUSIVE
   );
+  const system1 = useExperimentOverrideValue(EXPERIMENT_IDS.SYSTEM_1);
+
+  const [preferredSystem1Model] = usePersistedState<unknown>(PREFERRED_SYSTEM_1_MODEL_KEY, "", {
+    listener: true,
+  });
+  const system1ModelTrimmed =
+    typeof preferredSystem1Model === "string" ? preferredSystem1Model.trim() : undefined;
+  const system1Model =
+    system1ModelTrimmed !== undefined && system1ModelTrimmed.length > 0
+      ? system1ModelTrimmed
+      : undefined;
+
+  const [preferredSystem1ThinkingLevel] = usePersistedState<unknown>(
+    PREFERRED_SYSTEM_1_THINKING_LEVEL_KEY,
+    "off",
+    { listener: true }
+  );
+  const system1ThinkingLevel = coerceThinkingLevel(preferredSystem1ThinkingLevel) ?? "off";
 
   // Compute base model (canonical format) for UI components
   const rawModel =
@@ -143,7 +183,9 @@ export function useSendMessageOptions(workspaceId: string): SendMessageOptionsWi
     providerOptions,
     defaultModel,
     gateway,
-    { postCompactionContext, programmaticToolCalling, programmaticToolCallingExclusive }
+    { postCompactionContext, programmaticToolCalling, programmaticToolCallingExclusive, system1 },
+    system1Model,
+    system1ThinkingLevel
   );
 
   return {

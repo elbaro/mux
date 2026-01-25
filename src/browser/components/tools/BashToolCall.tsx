@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { FileText, Layers } from "lucide-react";
+import { FileText, Info, Layers, Loader2 } from "lucide-react";
 import type { BashToolArgs, BashToolResult } from "@/common/types/tools";
 import { BASH_DEFAULT_TIMEOUT_SECS } from "@/common/constants/toolLimits";
 import {
@@ -95,11 +95,14 @@ const ElapsedTimeDisplay: React.FC<{ startedAt: number | undefined; isActive: bo
   return <> • {Math.round(elapsedRef.current / 1000)}s</>;
 };
 
-const EMPTY_LIVE_OUTPUT = {
+type BashLiveOutputView = NonNullable<ReturnType<typeof useBashToolLiveOutput>>;
+
+const EMPTY_LIVE_OUTPUT: BashLiveOutputView = {
   stdout: "",
   stderr: "",
   combined: "",
   truncated: false,
+  phase: undefined,
 };
 
 export const BashToolCall: React.FC<BashToolCallProps> = ({
@@ -195,6 +198,8 @@ export const BashToolCall: React.FC<BashToolCallProps> = ({
   const showLiveOutput =
     !isBackground && (status === "executing" || (Boolean(liveOutput) && !resultHasOutput));
 
+  const isFilteringLiveOutput = showLiveOutput && liveOutputView.phase === "filtering";
+
   const canSendToBackground = Boolean(
     toolCallId && workspaceId && foregroundBashToolCallIds.has(toolCallId)
   );
@@ -206,6 +211,11 @@ export const BashToolCall: React.FC<BashToolCallProps> = ({
       : undefined;
   const truncatedInfo = result && "truncated" in result ? result.truncated : undefined;
   const note = result && "note" in result ? result.note : undefined;
+
+  const isBackgroundResult = Boolean(result && "backgroundProcessId" in result);
+  const completedOutput = isBackgroundResult ? undefined : result?.output;
+  const completedHasOutput = typeof completedOutput === "string" && completedOutput.length > 0;
+  const showCompletedOutputSection = !isBackgroundResult && (completedHasOutput || Boolean(note));
 
   const handleToggle = () => {
     userToggledRef.current = true;
@@ -315,31 +325,33 @@ export const BashToolCall: React.FC<BashToolCallProps> = ({
 
               <DetailSection>
                 <DetailLabel>Output</DetailLabel>
-                <DetailContent
-                  ref={outputRef}
-                  onScroll={(e) => updatePinned(e.currentTarget)}
-                  className={cn(
-                    "px-2 py-1.5",
-                    combinedLiveOutput.length === 0 && "text-muted italic"
+                <div className="relative">
+                  <DetailContent
+                    ref={outputRef}
+                    onScroll={(e) => updatePinned(e.currentTarget)}
+                    className={cn(
+                      "px-2 py-1.5",
+                      combinedLiveOutput.length === 0 && "text-muted italic",
+                      isFilteringLiveOutput && "opacity-60 blur-[1px]"
+                    )}
+                  >
+                    {combinedLiveOutput.length > 0 ? combinedLiveOutput : "No output yet"}
+                  </DetailContent>
+                  {isFilteringLiveOutput && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <div className="text-muted flex items-center gap-1 rounded border border-white/10 bg-[var(--color-bg-tertiary)]/80 px-2 py-1 text-[10px] backdrop-blur-sm">
+                        <Loader2 aria-hidden="true" className="h-3 w-3 animate-spin" />
+                        Compacting output…
+                      </div>
+                    </div>
                   )}
-                >
-                  {combinedLiveOutput.length > 0 ? combinedLiveOutput : "No output yet"}
-                </DetailContent>
+                </div>
               </DetailSection>
             </>
           )}
 
           {result && (
             <>
-              {note && (
-                <DetailSection>
-                  <DetailLabel>Notice</DetailLabel>
-                  <div className="text-muted text-[11px] break-words whitespace-pre-wrap">
-                    {note}
-                  </div>
-                </DetailSection>
-              )}
-
               {result.success === false && result.error && (
                 <DetailSection>
                   <DetailLabel>Error</DetailLabel>
@@ -364,11 +376,33 @@ export const BashToolCall: React.FC<BashToolCallProps> = ({
                   </code>
                 </div>
               ) : (
-                // Normal process: show output
-                result.output && (
+                // Normal process: show output (and any notice via tooltip)
+                showCompletedOutputSection && (
                   <DetailSection>
-                    <DetailLabel>Output</DetailLabel>
-                    <DetailContent className="px-2 py-1.5">{result.output}</DetailContent>
+                    <DetailLabel className="flex items-center gap-1">
+                      <span>Output</span>
+                      {note && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label="View notice"
+                              className="text-muted hover:text-secondary translate-y-[-1px] rounded p-0.5 transition-colors"
+                            >
+                              <Info size={12} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <div className="max-w-xs break-words whitespace-pre-wrap">{note}</div>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
+                    </DetailLabel>
+                    <DetailContent
+                      className={cn("px-2 py-1.5", !completedHasOutput && "text-muted italic")}
+                    >
+                      {completedHasOutput ? completedOutput : "No output"}
+                    </DetailContent>
                   </DetailSection>
                 )
               )}

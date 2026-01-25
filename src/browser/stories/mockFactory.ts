@@ -928,6 +928,7 @@ export function createTaskAwaitTool(
       reportMarkdown?: string;
       title?: string;
       error?: string;
+      note?: string;
     }>;
   }
 ): MuxPart {
@@ -948,6 +949,7 @@ export function createTaskAwaitTool(
             taskId: r.taskId,
             reportMarkdown: r.reportMarkdown ?? "",
             title: r.title,
+            note: r.note,
           };
         }
         if (r.status === "error") {
@@ -955,6 +957,13 @@ export function createTaskAwaitTool(
             status: "error" as const,
             taskId: r.taskId,
             error: r.error ?? "Unknown error",
+          };
+        }
+        if (r.status === "queued" || r.status === "running" || r.status === "awaiting_report") {
+          return {
+            status: r.status,
+            taskId: r.taskId,
+            note: r.note,
           };
         }
         return {

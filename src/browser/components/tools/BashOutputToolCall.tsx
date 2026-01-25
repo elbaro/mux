@@ -41,6 +41,7 @@ export const BashOutputToolCall: React.FC<BashOutputToolCallProps> = ({
 
   // Derive process status display
   const processStatus = result?.success ? result.status : undefined;
+  const note = result?.success ? result.note : undefined;
 
   return (
     <ToolContainer expanded={expanded}>
@@ -78,7 +79,7 @@ export const BashOutputToolCall: React.FC<BashOutputToolCallProps> = ({
               )}
 
               {result.success && (
-                <OutputSection output={result.output} emptyMessage="No new output" />
+                <OutputSection output={result.output} note={note} emptyMessage="No new output" />
               )}
             </>
           )}

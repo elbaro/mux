@@ -400,6 +400,75 @@ export const ModelsConfigured: AppStory = {
   },
 };
 
+/** System 1 section - experiment gated */
+export const System1: AppStory = {
+  render: () => (
+    <AppWithMocks
+      setup={() =>
+        setupSettingsStory({
+          experiments: { [EXPERIMENT_IDS.SYSTEM_1]: true },
+          taskSettings: {
+            bashOutputCompactionMinLines: 12,
+            bashOutputCompactionMinTotalBytes: 8192,
+            bashOutputCompactionMaxKeptLines: 55,
+            bashOutputCompactionTimeoutMs: 9000,
+          },
+          providersConfig: {
+            anthropic: {
+              apiKeySet: true,
+              isConfigured: true,
+              baseUrl: "",
+              models: ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+            },
+            openai: {
+              apiKeySet: true,
+              isConfigured: true,
+              baseUrl: "",
+              models: ["gpt-4o", "gpt-4o-mini", "o1-preview"],
+            },
+          },
+        })
+      }
+    />
+  ),
+  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    await openSettingsToSection(canvasElement, "system 1");
+
+    const body = within(canvasElement.ownerDocument.body);
+    const dialog = await body.findByRole("dialog");
+    const dialogCanvas = within(dialog);
+
+    await dialogCanvas.findByText(/System 1 Model/i);
+    await dialogCanvas.findByText(/System 1 Reasoning/i);
+    await dialogCanvas.findByRole("heading", { name: /bash output compaction/i });
+
+    const inputs = await dialogCanvas.findAllByRole("spinbutton");
+    if (inputs.length !== 4) {
+      throw new Error(`Expected 4 System 1 inputs, got ${inputs.length}`);
+    }
+
+    await waitFor(() => {
+      const minLines = (inputs[0] as HTMLInputElement).value;
+      const minTotalKb = (inputs[1] as HTMLInputElement).value;
+      const maxKeptLines = (inputs[2] as HTMLInputElement).value;
+      const timeoutSeconds = (inputs[3] as HTMLInputElement).value;
+
+      if (minLines !== "12") {
+        throw new Error(`Expected minLines=12, got ${JSON.stringify(minLines)}`);
+      }
+      if (minTotalKb !== "8") {
+        throw new Error(`Expected minTotalKb=8, got ${JSON.stringify(minTotalKb)}`);
+      }
+      if (maxKeptLines !== "55") {
+        throw new Error(`Expected maxKeptLines=55, got ${JSON.stringify(maxKeptLines)}`);
+      }
+      if (timeoutSeconds !== "9") {
+        throw new Error(`Expected timeoutSeconds=9, got ${JSON.stringify(timeoutSeconds)}`);
+      }
+    });
+  },
+};
+
 /** Experiments section - shows available experiments */
 export const Experiments: AppStory = {
   render: () => <AppWithMocks setup={() => setupSettingsStory({})} />,
