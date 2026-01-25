@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+/** Top file path entry for file_read/file_edit consumers */
+export const TopFilePathSchema = z.object({
+  path: z.string().meta({ description: "File path (relative or absolute)" }),
+  tokens: z.number().meta({ description: "Token count for this file" }),
+});
+
 export const TokenConsumerSchema = z.object({
   name: z.string().meta({ description: '"User", "Assistant", "bash", "readFile", etc.' }),
   tokens: z.number().meta({ description: "Total token count for this consumer" }),
@@ -36,6 +42,10 @@ export const ChatStatsSchema = z.object({
   usageHistory: z
     .array(ChatUsageDisplaySchema)
     .meta({ description: "Ordered array of actual usage statistics from API responses" }),
+  topFilePaths: z
+    .array(TopFilePathSchema)
+    .optional()
+    .meta({ description: "Top 10 files by token count aggregated across all file tools" }),
 });
 
 /**
