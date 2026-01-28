@@ -56,7 +56,25 @@ const AgentStatusSchema = z.object({
 export type LoadedSkill = AgentSkillDescriptor;
 
 type AgentStatus = z.infer<typeof AgentStatusSchema>;
+
+/**
+ * Maximum number of DisplayedMessages to render before truncation kicks in.
+ * We keep all user/assistant text messages (fast to render) and filter out
+ * tool calls and reasoning blocks from older history for DOM performance.
+ */
 const MAX_DISPLAYED_MESSAGES = 128;
+
+/**
+ * Message types that are always preserved even in truncated history.
+ * We only omit tool calls and reasoning blocks; everything else stays visible.
+ */
+const ALWAYS_KEEP_MESSAGE_TYPES = new Set<DisplayedMessage["type"]>([
+  "user",
+  "assistant",
+  "stream-error",
+  "plan-display",
+  "workspace-init",
+]);
 
 interface StreamingContext {
   /** Backend timestamp when stream started (Date.now()) */
@@ -2075,6 +2093,34 @@ export class StreamingMessageAggregator {
   }
 
   /**
+   * After filtering older tool/reasoning parts, recompute which part is the
+   * last visible block for each assistant message. This keeps meta rows and
+   * interrupted barriers accurate after truncation.
+   */
+  private normalizeLastPartFlags(messages: DisplayedMessage[]): DisplayedMessage[] {
+    const seenHistoryIds = new Set<string>();
+    let didChange = false;
+    const normalized = messages.slice();
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (!("isLastPartOfMessage" in msg) || typeof msg.historyId !== "string") {
+        continue;
+      }
+
+      const shouldBeLast = !seenHistoryIds.has(msg.historyId);
+      seenHistoryIds.add(msg.historyId);
+
+      if (msg.isLastPartOfMessage !== shouldBeLast) {
+        normalized[i] = { ...msg, isLastPartOfMessage: shouldBeLast };
+        didChange = true;
+      }
+    }
+
+    return didChange ? normalized : messages;
+  }
+
+  /**
    * Transform MuxMessages into DisplayedMessages for UI consumption
    * This splits complex messages with multiple parts into separate UI blocks
    * while preserving temporal ordering through sequence numbers
@@ -2113,6 +2159,57 @@ export class StreamingMessageAggregator {
         }
       }
 
+      let resultMessages = displayedMessages;
+
+      // Limit messages for DOM performance (unless explicitly disabled).
+      // Strategy: keep ALL user/assistant text messages (fast to render) but filter out
+      // tool calls and reasoning blocks from older portions of the chat.
+      // Full history is still maintained internally for token counting.
+      if (!this.showAllMessages && displayedMessages.length > MAX_DISPLAYED_MESSAGES) {
+        // Split into "old" (candidates for filtering) and "recent" (always keep intact)
+        const recentMessages = displayedMessages.slice(-MAX_DISPLAYED_MESSAGES);
+        const oldMessages = displayedMessages.slice(0, -MAX_DISPLAYED_MESSAGES);
+
+        const omittedMessageCounts = { tool: 0, reasoning: 0 };
+        let hiddenCount = 0;
+        let insertionIndex: number | null = null;
+        const filteredOldMessages: DisplayedMessage[] = [];
+
+        for (const msg of oldMessages) {
+          if (ALWAYS_KEEP_MESSAGE_TYPES.has(msg.type)) {
+            filteredOldMessages.push(msg);
+            continue;
+          }
+
+          if (msg.type === "tool") {
+            omittedMessageCounts.tool += 1;
+          } else if (msg.type === "reasoning") {
+            omittedMessageCounts.reasoning += 1;
+          }
+
+          hiddenCount += 1;
+          insertionIndex ??= filteredOldMessages.length;
+        }
+
+        const hasOmissions = hiddenCount > 0;
+
+        if (hasOmissions) {
+          const insertAt = insertionIndex ?? filteredOldMessages.length;
+          const messagesWithMarker = [...filteredOldMessages];
+          messagesWithMarker.splice(insertAt, 0, {
+            type: "history-hidden" as const,
+            id: "history-hidden",
+            hiddenCount,
+            historySequence: -1, // Non-persisted marker for truncated history
+            omittedMessageCounts,
+          });
+
+          resultMessages = this.normalizeLastPartFlags([...messagesWithMarker, ...recentMessages]);
+        } else {
+          resultMessages = [...filteredOldMessages, ...recentMessages];
+        }
+      }
+
       // Add init state if present (ephemeral, appears at top)
       if (this.initState) {
         const durationMs =
@@ -2131,31 +2228,11 @@ export class StreamingMessageAggregator {
           durationMs,
           truncatedLines: this.initState.truncatedLines,
         };
-        displayedMessages.unshift(initMessage);
-      }
-
-      // Limit to last N messages for DOM performance (unless explicitly disabled)
-      // Full history is still maintained internally for token counting
-      if (!this.showAllMessages && displayedMessages.length > MAX_DISPLAYED_MESSAGES) {
-        const hiddenCount = displayedMessages.length - MAX_DISPLAYED_MESSAGES;
-        const slicedMessages = displayedMessages.slice(-MAX_DISPLAYED_MESSAGES);
-
-        // Add history-hidden indicator as the first message
-        const historyHiddenMessage: DisplayedMessage = {
-          type: "history-hidden",
-          id: "history-hidden",
-          hiddenCount,
-          historySequence: -1, // Place it before all messages
-        };
-
-        // Cache the sliced result to maintain stable references and avoid recomputation
-        const result = [historyHiddenMessage, ...slicedMessages];
-        this.cache.displayedMessages = result;
-        return result;
+        resultMessages = [initMessage, ...resultMessages];
       }
 
       // Return the full array
-      this.cache.displayedMessages = displayedMessages;
+      this.cache.displayedMessages = resultMessages;
     }
     return this.cache.displayedMessages;
   }
