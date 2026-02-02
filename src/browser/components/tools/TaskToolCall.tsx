@@ -25,6 +25,7 @@ import {
   useOptionalWorkspaceContext,
   toWorkspaceSelection,
 } from "@/browser/contexts/WorkspaceContext";
+import { useTaskToolLiveTaskId } from "@/browser/stores/WorkspaceStore";
 import { useCopyToClipboard } from "@/browser/hooks/useCopyToClipboard";
 import { useBackgroundProcesses } from "@/browser/stores/BackgroundBashStore";
 import type { FrontendWorkspaceMetadata } from "@/common/types/workspace";
@@ -280,11 +281,12 @@ function fromBashTaskId(taskId: string): string | null {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 interface TaskToolCallProps {
-  workspaceId?: string;
   args: TaskToolArgs;
   result?: TaskToolResult;
   status?: ToolStatus;
   taskReportLinking?: TaskReportLinking;
+  workspaceId?: string;
+  toolCallId?: string;
 }
 
 export const TaskToolCall: React.FC<TaskToolCallProps> = ({
@@ -293,13 +295,16 @@ export const TaskToolCall: React.FC<TaskToolCallProps> = ({
   result,
   status = "pending",
   taskReportLinking,
+  toolCallId,
 }) => {
   // Narrow result to error or success shape
   const errorResult = isToolErrorResult(result) ? result : null;
   const successResult = result && typeof result === "object" && "status" in result ? result : null;
 
-  // Derive task state from the spawn response
-  const taskId = successResult?.taskId;
+  const liveTaskId = useTaskToolLiveTaskId(workspaceId, toolCallId);
+
+  // Derive task state from the spawn response (or UI-only task-created event while executing)
+  const taskId = successResult?.taskId ?? liveTaskId ?? undefined;
   const taskStatus = successResult?.status;
 
   // Render-time linking: if a later task_await produced the final report, display it here.

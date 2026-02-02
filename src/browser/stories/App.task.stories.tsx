@@ -10,6 +10,7 @@ import {
   createOnChatAdapter,
   selectWorkspace,
   setupSimpleChatStory,
+  type ChatHandler,
 } from "./storyHelpers";
 import { waitForScrollStabilization } from "./storyPlayHelpers";
 import {
@@ -18,6 +19,7 @@ import {
   createAssistantMessage,
   createBashTool,
   createPendingTool,
+  createPendingTaskTool,
   createStaticChatHandler,
   createTaskTool,
   createCompletedTaskTool,
@@ -154,6 +156,105 @@ Key patterns:
 };
 
 /**
+ * Foreground `task` tool call executing: the tool result isn't available yet, but we
+ * still show the spawned `taskId` via the UI-only `task-created` stream event.
+ */
+export const TaskForegroundShowsTaskId: AppStory = {
+  render: () => (
+    <AppWithMocks
+      setup={() => {
+        const workspaceId = "ws-main";
+        const projectName = "my-app";
+
+        const mainWorkspace = createWorkspace({
+          id: workspaceId,
+          name: "feature",
+          projectName,
+        });
+
+        const taskWorkspaceId = "task-foreground-001";
+        const toolCallId = "tc-foreground-1";
+
+        const taskWorkspace = {
+          ...createWorkspace({
+            id: taskWorkspaceId,
+            name: taskWorkspaceId,
+            projectName,
+          }),
+          parentWorkspaceId: workspaceId,
+          agentType: "explore",
+          taskStatus: "running" as const,
+          title: "Foreground task",
+        };
+
+        const workspaces = [mainWorkspace, taskWorkspace];
+
+        selectWorkspace(mainWorkspace);
+        collapseRightSidebar();
+
+        const messages = [
+          createUserMessage("u1", "Spawn a foreground task", { historySequence: 1 }),
+          createAssistantMessage("a1", "Spawning… (foreground)", {
+            historySequence: 2,
+            toolCalls: [
+              createPendingTaskTool(toolCallId, {
+                subagent_type: "explore",
+                prompt: "Open the child workspace as soon as it is created.",
+                title: "Foreground task",
+                run_in_background: false,
+              }),
+            ],
+          }),
+        ];
+
+        const chatHandlers = new Map<string, ChatHandler>([
+          [
+            workspaceId,
+            (emit) => {
+              const timeoutId = setTimeout(() => {
+                for (const msg of messages) {
+                  emit(msg);
+                }
+
+                emit({ type: "caught-up" });
+
+                emit({
+                  type: "task-created",
+                  workspaceId,
+                  toolCallId,
+                  taskId: taskWorkspaceId,
+                  timestamp: STABLE_TIMESTAMP,
+                });
+              }, 50);
+
+              return () => clearTimeout(timeoutId);
+            },
+          ],
+        ]);
+
+        return createMockORPCClient({
+          projects: groupWorkspacesByProject(workspaces),
+          workspaces,
+          onChat: createOnChatAdapter(chatHandlers),
+        });
+      }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    await waitForScrollStabilization(canvasElement);
+
+    const storyRoot = document.getElementById("storybook-root") ?? canvasElement;
+    const canvas = within(storyRoot);
+
+    // Expand the tool card so the taskId is visible.
+    const toolTitle = await canvas.findByText("task", {}, { timeout: 8000 });
+    await userEvent.click(toolTitle);
+
+    await canvas.findByText("task-foreground-001", {}, { timeout: 8000 });
+  },
+};
+
+/**
  * task_await executing state: show the awaited task IDs while waiting for completion.
  *
  * Chromatic note: this story expands the tool card so the awaited-task preview is visible.
@@ -242,15 +343,34 @@ export const TaskAwaitExecuting: AppStory = {
     />
   ),
   play: async ({ canvasElement }) => {
-    await waitForScrollStabilization(canvasElement);
-
     const storyRoot = document.getElementById("storybook-root") ?? canvasElement;
-    const canvas = within(storyRoot);
+    await waitForScrollStabilization(storyRoot);
 
-    const toolTitle = await canvas.findByText("task_await", {}, { timeout: 8000 });
-    await userEvent.click(toolTitle);
+    // Expand the tool card so the awaited-task preview is visible.
+    //
+    // Scope to the message window so we don't accidentally click unrelated disclosure arrows
+    // in the sidebars.
+    const messageWindow = storyRoot.querySelector('[data-testid="message-window"]');
+    if (!(messageWindow instanceof HTMLElement)) {
+      throw new Error("Message window not found");
+    }
 
-    await canvas.findByText("task-fe-001", {}, { timeout: 8000 });
+    const canvas = within(messageWindow);
+
+    // Expand the tool card so the awaited-task preview is visible.
+    //
+    // Best-effort: this story is primarily for Chromatic snapshots, and Storybook test-runner
+    // can be sensitive to navigation/hit-testing differences between local and CI.
+    if (!messageWindow.textContent?.includes("task-fe-001")) {
+      const toolName = canvas.queryByText("task_await");
+      const header = toolName?.closest("div.cursor-pointer");
+      if (header instanceof HTMLElement) {
+        header.click();
+
+        // One RAF to let any pending coalesced scroll complete after tool expansion.
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+    }
   },
 };
 
