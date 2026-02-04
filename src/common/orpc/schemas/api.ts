@@ -173,12 +173,45 @@ export const policy = {
     input: z.void(),
     output: eventIterator(z.void()),
   },
+  // Force a refresh of the effective policy (re-reads MUX_POLICY_FILE or Governor policy)
+  refreshNow: {
+    input: z.void(),
+    output: ResultSchema(PolicyGetResponseSchema, z.string()),
+  },
 };
 
 // Mux Gateway OAuth (desktop login flow)
 export const muxGatewayOauth = {
   startDesktopFlow: {
     input: z.void(),
+    output: ResultSchema(
+      z.object({
+        flowId: z.string(),
+        authorizeUrl: z.string(),
+        redirectUri: z.string(),
+      }),
+      z.string()
+    ),
+  },
+  waitForDesktopFlow: {
+    input: z
+      .object({
+        flowId: z.string(),
+        timeoutMs: z.number().int().positive().optional(),
+      })
+      .strict(),
+    output: ResultSchema(z.void(), z.string()),
+  },
+  cancelDesktopFlow: {
+    input: z.object({ flowId: z.string() }).strict(),
+    output: z.void(),
+  },
+};
+
+// Mux Governor OAuth (enrollment for enterprise policy service)
+export const muxGovernorOauth = {
+  startDesktopFlow: {
+    input: z.object({ governorOrigin: z.string() }).strict(),
     output: ResultSchema(
       z.object({
         flowId: z.string(),
@@ -1124,6 +1157,9 @@ export const config = {
       agentAiDefaults: AgentAiDefaultsSchema,
       // Legacy fields (downgrade compatibility)
       subagentAiDefaults: SubagentAiDefaultsSchema,
+      // Mux Governor enrollment status (safe fields only - token never exposed)
+      muxGovernorUrl: z.string().nullable(),
+      muxGovernorEnrolled: z.boolean(),
     }),
   },
   saveConfig: {
@@ -1155,6 +1191,10 @@ export const config = {
       muxGatewayEnabled: z.boolean(),
       muxGatewayModels: z.array(z.string()),
     }),
+    output: z.void(),
+  },
+  unenrollMuxGovernor: {
+    input: z.void(),
     output: z.void(),
   },
 };
