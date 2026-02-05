@@ -11,7 +11,22 @@ import { useAPI } from "@/browser/contexts/API";
 import { copyToClipboard } from "@/browser/utils/clipboard";
 import { formatKeybind, KEYBINDS } from "@/browser/utils/ui/keybinds";
 import { getSendOptionsFromStorage } from "@/browser/utils/messages/sendOptions";
-import { uploadToMuxMd, type FileInfo } from "@/common/lib/muxMd";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/browser/components/ui/select";
+import { readPersistedState, updatePersistedState } from "@/browser/hooks/usePersistedState";
+import { SHARE_EXPIRATION_KEY } from "@/common/constants/storage";
+import { uploadToMuxMd, updateMuxMdExpiration, type FileInfo } from "@/common/lib/muxMd";
+import {
+  EXPIRATION_OPTIONS,
+  type ExpirationValue,
+  expirationToMs,
+  timestampToExpiration,
+} from "@/common/lib/shareExpiration";
 import { cn } from "@/common/lib/utils";
 import type { MuxMessage } from "@/common/types/message";
 import { buildChatJsonlForSharing } from "@/common/utils/messages/transcriptShare";
@@ -59,6 +74,10 @@ export function ShareTranscriptPopover(props: ShareTranscriptPopoverProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareId, setShareId] = useState<string | null>(null);
+  const [shareMutateKey, setShareMutateKey] = useState<string | null>(null);
+  const [shareExpiresAt, setShareExpiresAt] = useState<number | undefined>();
+  const [isUpdatingExpiration, setIsUpdatingExpiration] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -70,9 +89,13 @@ export function ShareTranscriptPopover(props: ShareTranscriptPopoverProps) {
   useEffect(() => {
     uploadSeqRef.current += 1;
     setShareUrl(null);
+    setShareId(null);
+    setShareMutateKey(null);
+    setShareExpiresAt(undefined);
     setError(null);
     setCopied(false);
     setIsUploading(false);
+    setIsUpdatingExpiration(false);
   }, [props.workspaceId]);
 
   useEffect(() => {
@@ -137,9 +160,18 @@ export function ShareTranscriptPopover(props: ShareTranscriptPopoverProps) {
         thinking: sendOptions.thinkingLevel,
       };
 
-      const result = await uploadToMuxMd(chatJsonl, fileInfo);
+      const result = await uploadToMuxMd(chatJsonl, fileInfo, {
+        expiresAt: (() => {
+          const preferred = readPersistedState<ExpirationValue>(SHARE_EXPIRATION_KEY, "never");
+          const expMs = expirationToMs(preferred);
+          return expMs ? new Date(Date.now() + expMs) : undefined;
+        })(),
+      });
       if (uploadSeqRef.current === uploadSeq) {
         setShareUrl(result.url);
+        setShareId(result.id);
+        setShareMutateKey(result.mutateKey);
+        setShareExpiresAt(result.expiresAt);
       }
     } catch (err) {
       console.error("Failed to share transcript:", err);
@@ -152,6 +184,31 @@ export function ShareTranscriptPopover(props: ShareTranscriptPopoverProps) {
       }
     }
   }, [api, includeToolOutput, isUploading, props.workspaceId, props.workspaceName, store]);
+
+  const handleUpdateExpiration = async (value: ExpirationValue) => {
+    if (!shareId || !shareMutateKey) return;
+
+    // Capture the current upload sequence so we can discard the result if a new
+    // link is generated (workspace switch or re-upload) before this resolves.
+    const seq = uploadSeqRef.current;
+
+    setIsUpdatingExpiration(true);
+    try {
+      const ms = expirationToMs(value);
+      const expiresAtArg = ms ? new Date(Date.now() + ms) : "never";
+      const newExpiration = await updateMuxMdExpiration(shareId, shareMutateKey, expiresAtArg);
+      if (uploadSeqRef.current === seq) {
+        setShareExpiresAt(newExpiration);
+        updatePersistedState(SHARE_EXPIRATION_KEY, value);
+      }
+    } catch (err) {
+      console.error("Update expiration failed:", err);
+    } finally {
+      if (uploadSeqRef.current === seq) {
+        setIsUpdatingExpiration(false);
+      }
+    }
+  };
 
   const handleCopy = useCallback(() => {
     if (!shareUrl) {
@@ -236,48 +293,74 @@ export function ShareTranscriptPopover(props: ShareTranscriptPopoverProps) {
           </Button>
 
           {shareUrl && (
-            <div className="border-border bg-background flex items-center gap-1 rounded border px-2 py-1.5">
-              <input
-                ref={urlInputRef}
-                type="text"
-                readOnly
-                aria-label="Shared transcript URL"
-                value={shareUrl}
-                className="text-foreground min-w-0 flex-1 bg-transparent font-mono text-[10px] outline-none"
-                data-testid="share-transcript-url"
-                onFocus={(e) => e.target.select()}
-              />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={handleCopy}
-                    className="text-muted hover:bg-muted/50 hover:text-foreground shrink-0 rounded p-1 transition-colors"
-                    aria-label="Copy to clipboard"
-                    data-testid="copy-share-transcript-url"
-                  >
-                    {copied ? (
-                      <Check className="h-3.5 w-3.5 text-green-500" />
-                    ) : (
-                      <CopyIcon className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{copied ? "Copied!" : "Copy"}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={handleOpenInBrowser}
-                    className="text-muted hover:bg-muted/50 hover:text-foreground shrink-0 rounded p-1 transition-colors"
-                    aria-label="Open in browser"
-                    data-testid="open-share-transcript-url"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Open</TooltipContent>
-              </Tooltip>
-            </div>
+            <>
+              <div className="border-border bg-background flex items-center gap-1 rounded border px-2 py-1.5">
+                <input
+                  ref={urlInputRef}
+                  type="text"
+                  readOnly
+                  aria-label="Shared transcript URL"
+                  value={shareUrl}
+                  className="text-foreground min-w-0 flex-1 bg-transparent font-mono text-[10px] outline-none"
+                  data-testid="share-transcript-url"
+                  onFocus={(e) => e.target.select()}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={handleCopy}
+                      className="text-muted hover:bg-muted/50 hover:text-foreground shrink-0 rounded p-1 transition-colors"
+                      aria-label="Copy to clipboard"
+                      data-testid="copy-share-transcript-url"
+                    >
+                      {copied ? (
+                        <Check className="h-3.5 w-3.5 text-green-500" />
+                      ) : (
+                        <CopyIcon className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{copied ? "Copied!" : "Copy"}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={handleOpenInBrowser}
+                      className="text-muted hover:bg-muted/50 hover:text-foreground shrink-0 rounded p-1 transition-colors"
+                      aria-label="Open in browser"
+                      data-testid="open-share-transcript-url"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Open</TooltipContent>
+                </Tooltip>
+              </div>
+
+              {/* Expiration control */}
+              <div className="flex items-center gap-2">
+                <span className="text-muted text-[10px]">Expires:</span>
+                <Select
+                  value={timestampToExpiration(shareExpiresAt)}
+                  onValueChange={(v) => void handleUpdateExpiration(v as ExpirationValue)}
+                  disabled={isUploading || isUpdatingExpiration}
+                >
+                  <SelectTrigger className="h-6 flex-1 text-[10px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXPIRATION_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {isUpdatingExpiration && (
+                  <Loader2 className="text-muted h-3.5 w-3.5 animate-spin" />
+                )}
+              </div>
+            </>
           )}
 
           {error && (
