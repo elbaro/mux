@@ -15,7 +15,7 @@ import { isAbortError } from "@/browser/utils/isAbortError";
 import { getRetryStateKey } from "@/common/constants/storage";
 import { BASH_TRUNCATE_MAX_TOTAL_BYTES } from "@/common/constants/toolLimits";
 import { CUSTOM_EVENTS, createCustomEvent } from "@/common/constants/events";
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
   isCaughtUpMessage,
   isStreamError,
@@ -361,6 +361,9 @@ export class WorkspaceStore {
   private workspaceStats = new Map<string, WorkspaceStatsSnapshot>();
   private statsStore = new MapStore<string, WorkspaceStatsSnapshot | null>();
   private statsUnsubscribers = new Map<string, () => void>();
+  // Per-workspace listener refcount for useWorkspaceStatsSnapshot().
+  // Used to only subscribe to backend stats when something in the UI is actually reading them.
+  private statsListenerCounts = new Map<string, number>();
   // Cumulative session usage (from session-usage.json)
 
   private sessionUsage = new Map<string, z.infer<typeof SessionUsageFileSchema>>();
@@ -668,8 +671,11 @@ export class WorkspaceStore {
       }
       this.statsUnsubscribers.clear();
       this.workspaceStats.clear();
+      this.statsStore.clear();
 
-      for (const workspaceId of this.ipcUnsubscribers.keys()) {
+      // Clear is a global notification only. Bump any subscribed workspace IDs so
+      // useSyncExternalStore subscribers re-render and drop stale snapshots.
+      for (const workspaceId of this.statsListenerCounts.keys()) {
         this.statsStore.bump(workspaceId);
       }
       return;
@@ -805,6 +811,14 @@ export class WorkspaceStore {
       return;
     }
 
+    // Only subscribe when we have at least one UI consumer.
+    if (!this.ipcUnsubscribers.has(workspaceId)) {
+      return;
+    }
+    if ((this.statsListenerCounts.get(workspaceId) ?? 0) <= 0) {
+      return;
+    }
+
     // Skip if already subscribed
     if (this.statsUnsubscribers.has(workspaceId)) {
       return;
@@ -812,14 +826,22 @@ export class WorkspaceStore {
 
     const controller = new AbortController();
     const { signal } = controller;
+    let iterator: AsyncIterator<WorkspaceStatsSnapshot> | null = null;
 
     (async () => {
       try {
-        const iterator = await this.client!.workspace.stats.subscribe({ workspaceId }, { signal });
+        const subscribedIterator = await this.client!.workspace.stats.subscribe(
+          { workspaceId },
+          { signal }
+        );
+        iterator = subscribedIterator;
 
-        for await (const snapshot of iterator) {
+        for await (const snapshot of subscribedIterator) {
           if (signal.aborted) break;
           queueMicrotask(() => {
+            if (signal.aborted) {
+              return;
+            }
             this.workspaceStats.set(workspaceId, snapshot);
             this.statsStore.bump(workspaceId);
           });
@@ -830,7 +852,10 @@ export class WorkspaceStore {
       }
     })();
 
-    this.statsUnsubscribers.set(workspaceId, () => controller.abort());
+    this.statsUnsubscribers.set(workspaceId, () => {
+      controller.abort();
+      void iterator?.return?.();
+    });
   }
 
   /**
@@ -1377,7 +1402,49 @@ export class WorkspaceStore {
    * Subscribe to backend timing stats snapshots for a specific workspace.
    */
   subscribeStats(workspaceId: string, listener: () => void): () => void {
-    return this.statsStore.subscribeKey(workspaceId, listener);
+    const unsubscribeFromStore = this.statsStore.subscribeKey(workspaceId, listener);
+
+    const previousCount = this.statsListenerCounts.get(workspaceId) ?? 0;
+    const nextCount = previousCount + 1;
+    this.statsListenerCounts.set(workspaceId, nextCount);
+
+    if (previousCount === 0) {
+      // Start the backend subscription only once we have an actual UI consumer.
+      this.subscribeToStats(workspaceId);
+    }
+
+    return () => {
+      unsubscribeFromStore();
+
+      const currentCount = this.statsListenerCounts.get(workspaceId);
+      if (!currentCount) {
+        console.warn(
+          `[WorkspaceStore] stats listener count underflow for ${workspaceId} (already 0)`
+        );
+        return;
+      }
+
+      if (currentCount === 1) {
+        this.statsListenerCounts.delete(workspaceId);
+
+        // No remaining listeners: stop the backend subscription and drop cached snapshot.
+        const statsUnsubscribe = this.statsUnsubscribers.get(workspaceId);
+        if (statsUnsubscribe) {
+          statsUnsubscribe();
+          this.statsUnsubscribers.delete(workspaceId);
+        }
+        this.workspaceStats.delete(workspaceId);
+
+        // Clear MapStore caches for this workspace.
+        // MapStore.delete() is version-gated, so bump first to ensure we clear even
+        // if the key was only ever read (get()) and never bumped.
+        this.statsStore.bump(workspaceId);
+        this.statsStore.delete(workspaceId);
+        return;
+      }
+
+      this.statsListenerCounts.set(workspaceId, currentCount - 1);
+    };
   }
 
   /**
@@ -1434,18 +1501,22 @@ export class WorkspaceStore {
         return;
       }
 
+      const onAbort = () => {
+        cleanup();
+        resolve();
+      };
+
       const timeout = setTimeout(() => {
+        cleanup();
         resolve();
       }, timeoutMs);
 
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        { once: true }
-      );
+      const cleanup = () => {
+        clearTimeout(timeout);
+        signal.removeEventListener("abort", onAbort);
+      };
+
+      signal.addEventListener("abort", onAbort, { once: true });
     });
   }
 
@@ -1809,6 +1880,7 @@ export class WorkspaceStore {
     this.chatTransientState.clear();
     this.workspaceStats.clear();
     this.statsStore.clear();
+    this.statsListenerCounts.clear();
     this.sessionUsage.clear();
     this.recencyCache.clear();
     this.previousSidebarValues.clear();
@@ -2365,10 +2437,20 @@ export function useWorkspaceUsage(workspaceId: string): WorkspaceUsageState {
  */
 export function useWorkspaceStatsSnapshot(workspaceId: string): WorkspaceStatsSnapshot | null {
   const store = getStoreInstance();
-  return useSyncExternalStore(
-    (listener) => store.subscribeStats(workspaceId, listener),
-    () => store.getWorkspaceStatsSnapshot(workspaceId)
+
+  // NOTE: subscribeStats() starts/stops a backend subscription; if React re-subscribes on every
+  // render (because the subscribe callback is unstable), we can trigger an infinite loop.
+  // This useCallback is for correctness, not performance.
+  const subscribe = useCallback(
+    (listener: () => void) => store.subscribeStats(workspaceId, listener),
+    [store, workspaceId]
   );
+  const getSnapshot = useCallback(
+    () => store.getWorkspaceStatsSnapshot(workspaceId),
+    [store, workspaceId]
+  );
+
+  return useSyncExternalStore(subscribe, getSnapshot);
 }
 
 /**
