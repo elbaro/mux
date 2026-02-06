@@ -353,18 +353,26 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
       if (powerMode.enabled) {
         const prev = latestInputValueRef.current;
         const delta = next.length - prev.length;
-        const el = inputRef.current;
 
-        if (el && next !== prev) {
-          // Power Mode should feel responsive on backspace/delete too.
-          if (delta > 0) {
-            powerMode.burstFromTextarea(el, Math.min(6, delta));
-          } else if (delta < 0) {
-            powerMode.burstFromTextarea(el, Math.min(6, -delta), "delete");
-          } else {
-            // Selection replace / overwrite with no net length change.
-            powerMode.burstFromTextarea(el, 1);
-          }
+        if (next !== prev) {
+          // Power Mode positioning depends on the textarea's post-layout size/position.
+          // On backspace/delete the textarea can shrink (auto-resize) which shifts the caret
+          // downward; if we measure immediately we can get a stale bounding rect and the
+          // fireworks appear out-of-sync with the cursor.
+          const intensity = delta > 0 ? Math.min(6, delta) : delta < 0 ? Math.min(6, -delta) : 1;
+          const kind = delta < 0 ? "delete" : "insert";
+          // Capture the caret index now (before rAF) so bursts queued within the same frame
+          // don't all measure the latest caret position and appear "ahead" during fast typing.
+          const caretIndex = inputRef.current?.selectionStart ?? next.length;
+
+          requestAnimationFrame(() => {
+            const el = inputRef.current;
+            if (!el) {
+              return;
+            }
+
+            powerMode.burstFromTextarea(el, intensity, kind, caretIndex);
+          });
         }
       }
 
