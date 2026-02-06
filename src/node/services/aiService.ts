@@ -2523,6 +2523,7 @@ export class AIService extends EventEmitter {
             routedThroughGateway,
             systemMessageTokens,
             agentId: effectiveAgentId,
+            thinkingLevel: effectiveThinkingLevel,
             partial: true,
             error: errorMessage,
             errorType: "context_exceeded",
@@ -2542,6 +2543,7 @@ export class AIService extends EventEmitter {
           startTime: Date.now(),
           agentId: effectiveAgentId,
           mode: effectiveMode,
+          thinkingLevel: effectiveThinkingLevel,
         };
         this.emit("stream-start", streamStartEvent);
 
@@ -2564,6 +2566,7 @@ export class AIService extends EventEmitter {
           routedThroughGateway,
           systemMessageTokens,
           agentId: effectiveAgentId,
+          thinkingLevel: effectiveThinkingLevel,
           toolPolicy: effectiveToolPolicy,
         });
 
@@ -2584,6 +2587,7 @@ export class AIService extends EventEmitter {
           startTime: Date.now(),
           agentId: effectiveAgentId,
           mode: effectiveMode,
+          thinkingLevel: effectiveThinkingLevel,
         };
         this.emit("stream-start", streamStartEvent);
 
@@ -2614,6 +2618,7 @@ export class AIService extends EventEmitter {
           messageId: assistantMessageId,
           metadata: {
             model: canonicalModelString,
+            thinkingLevel: effectiveThinkingLevel,
             routedThroughGateway,
             systemMessageTokens,
           },
@@ -3401,7 +3406,8 @@ export class AIService extends EventEmitter {
         effectiveToolPolicy,
         streamToken, // Pass the pre-generated stream token
         hasQueuedMessage,
-        metadata.name
+        metadata.name,
+        effectiveThinkingLevel
       );
 
       if (!streamResult.success) {

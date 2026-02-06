@@ -111,6 +111,9 @@ interface StreamingContext {
 
   /** Mode (plan/exec) */
   mode?: string;
+
+  /** Effective thinking level after model policy clamping */
+  thinkingLevel?: string;
 }
 
 /**
@@ -1155,6 +1158,32 @@ export class StreamingMessageAggregator {
     return undefined;
   }
 
+  /**
+   * Returns the effective thinking level for the current or most recent stream.
+   * This reflects the actual level used after model policy clamping, not the
+   * user-configured level.
+   */
+  getCurrentThinkingLevel(): string | undefined {
+    // If there's an active stream, return its thinking level
+    for (const context of this.activeStreams.values()) {
+      return context.thinkingLevel;
+    }
+
+    // Only check the most recent assistant message to avoid returning
+    // stale values from older turns where settings may have differed.
+    // If it lacks thinkingLevel (e.g. error/abort), return undefined so
+    // callers fall back to localStorage.
+    const messages = this.getAllMessages();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role === "assistant") {
+        return message.metadata?.thinkingLevel;
+      }
+    }
+
+    return undefined;
+  }
+
   clearActiveStreams(): void {
     const activeMessageIds = Array.from(this.activeStreams.keys());
     this.activeStreams.clear();
@@ -1234,6 +1263,7 @@ export class StreamingMessageAggregator {
       toolExecutionMs: 0,
       pendingToolStarts: new Map(),
       mode: data.mode,
+      thinkingLevel: data.thinkingLevel,
     };
 
     // Use messageId as key - ensures only ONE stream per message
@@ -1247,6 +1277,7 @@ export class StreamingMessageAggregator {
       model: data.model,
       routedThroughGateway: data.routedThroughGateway,
       mode: data.mode,
+      thinkingLevel: data.thinkingLevel,
     });
 
     this.messages.set(data.messageId, streamingMessage);

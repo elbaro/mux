@@ -102,6 +102,7 @@ export const MuxMessageSchema = z.object({
       historySequence: z.number().optional(),
       timestamp: z.number().optional(),
       model: z.string().optional(),
+      thinkingLevel: z.enum(["off", "low", "medium", "high", "xhigh", "max"]).optional(),
       routedThroughGateway: z.boolean().optional(),
       usage: z.any().optional(),
       contextUsage: z.any().optional(),

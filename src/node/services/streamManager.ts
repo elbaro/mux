@@ -26,6 +26,7 @@ import type {
 
 import type { SendMessageError, StreamErrorType } from "@/common/types/errors";
 import type { MuxMetadata, MuxMessage } from "@/common/types/message";
+import type { ThinkingLevel } from "@/common/types/thinking";
 import type { NestedToolCall } from "@/common/orpc/schemas/message";
 import {
   coerceStreamErrorTypeForMessage,
@@ -182,6 +183,8 @@ interface WorkspaceStreamInfo {
   lastPartTimestamp: number;
 
   model: string;
+  /** Effective thinking level after model policy clamping */
+  thinkingLevel?: string;
   initialMetadata?: Partial<MuxMetadata>;
   request: StreamRequestConfig;
   // Track last prepared step messages for safe retries after tool steps
@@ -347,6 +350,9 @@ export class StreamManager extends EventEmitter {
             ...streamInfo.initialMetadata,
             model: canonicalModel,
             routedThroughGateway,
+            ...(streamInfo.thinkingLevel && {
+              thinkingLevel: streamInfo.thinkingLevel as ThinkingLevel,
+            }),
             partial: true, // Always true - this method only writes partial messages
           },
           parts: streamInfo.parts, // Parts array includes reasoning, text, and tools
@@ -998,7 +1004,8 @@ export class StreamManager extends EventEmitter {
     maxOutputTokens?: number,
     toolPolicy?: ToolPolicy,
     hasQueuedMessage?: () => boolean,
-    workspaceName?: string
+    workspaceName?: string,
+    thinkingLevel?: string
   ): WorkspaceStreamInfo {
     // abortController is created and linked to the caller-provided abortSignal in startStream().
 
@@ -1037,6 +1044,7 @@ export class StreamManager extends EventEmitter {
       startTime,
       lastPartTimestamp: startTime,
       model: modelString,
+      thinkingLevel,
       initialMetadata,
       didRetryPreviousResponseIdAtStep: false,
       stepTracker,
@@ -1252,6 +1260,7 @@ export class StreamManager extends EventEmitter {
       startTime: streamInfo.startTime,
       ...(streamStartAgentId && { agentId: streamStartAgentId }),
       ...(streamStartMode && { mode: streamStartMode }),
+      ...(streamInfo.thinkingLevel && { thinkingLevel: streamInfo.thinkingLevel }),
     } as StreamStartEvent);
   }
 
@@ -1663,6 +1672,9 @@ export class StreamManager extends EventEmitter {
                 ...streamInfo.initialMetadata, // AIService-provided metadata (systemMessageTokens, etc)
                 model: canonicalModel,
                 routedThroughGateway,
+                ...(streamInfo.thinkingLevel && {
+                  thinkingLevel: streamInfo.thinkingLevel as ThinkingLevel,
+                }),
                 usage: totalUsage, // Total across all steps (for cost calculation)
                 contextUsage, // Last step only (for context window display)
                 providerMetadata, // Aggregated (for cost calculation)
@@ -1901,6 +1913,9 @@ export class StreamManager extends EventEmitter {
         ...streamInfo.initialMetadata,
         model: canonicalModel,
         routedThroughGateway,
+        ...(streamInfo.thinkingLevel && {
+          thinkingLevel: streamInfo.thinkingLevel as ThinkingLevel,
+        }),
         partial: true,
         error: payload.error,
         errorType: payload.errorType,
@@ -2287,7 +2302,8 @@ export class StreamManager extends EventEmitter {
     toolPolicy?: ToolPolicy,
     providedStreamToken?: StreamToken,
     hasQueuedMessage?: () => boolean,
-    workspaceName?: string
+    workspaceName?: string,
+    thinkingLevel?: string
   ): Promise<Result<StreamToken, SendMessageError>> {
     const typedWorkspaceId = workspaceId as WorkspaceId;
 
@@ -2361,7 +2377,8 @@ export class StreamManager extends EventEmitter {
           maxOutputTokens,
           toolPolicy,
           hasQueuedMessage,
-          workspaceName
+          workspaceName,
+          thinkingLevel
         );
 
         // Guard against a narrow race:
