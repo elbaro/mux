@@ -22,7 +22,6 @@ import { useWorkspaceContext } from "@/browser/contexts/WorkspaceContext";
 import { useProjectContext } from "@/browser/contexts/ProjectContext";
 import { useAgent } from "@/browser/contexts/AgentContext";
 import { ThinkingSliderComponent } from "../ThinkingSlider";
-import { ModelSettings } from "../ModelSettings";
 import {
   getAllowedRuntimeModesForUi,
   isParsedRuntimeAllowedByPolicy,
@@ -463,10 +462,10 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
   // Context usage indicator data (workspace variant only)
   const workspaceIdForUsage = variant === "workspace" ? props.workspaceId : "";
   const usage = useWorkspaceUsage(workspaceIdForUsage);
-  const { options: providerOptions } = useProviderOptions();
-  const use1M = providerOptions.anthropic?.use1MContext ?? false;
+  const { has1MContext } = useProviderOptions();
   const lastUsage = usage?.liveUsage ?? usage?.lastContextUsage;
   const usageModel = lastUsage?.model ?? null;
+  const use1M = has1MContext(usageModel ?? "");
   const contextUsageData = useMemo(() => {
     return lastUsage
       ? calculateTokenMeterData(lastUsage, usageModel ?? "unknown", use1M, false)
@@ -2431,10 +2430,6 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
                   data-component="ThinkingSliderGroup"
                 >
                   <ThinkingSliderComponent modelString={baseModel} />
-                </div>
-
-                <div className="flex items-center" data-component="ModelSettingsGroup">
-                  <ModelSettings model={baseModel || ""} />
                 </div>
               </div>
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { Loader2, Plus, ShieldCheck } from "lucide-react";
+import { useProviderOptions } from "@/browser/hooks/useProviderOptions";
 import { Button } from "@/browser/components/ui/button";
 import { ProviderWithIcon } from "@/browser/components/ProviderIcon";
 import {
@@ -17,6 +18,7 @@ import { useProvidersConfig } from "@/browser/hooks/useProvidersConfig";
 import { SearchableModelSelect } from "../components/SearchableModelSelect";
 import { KNOWN_MODELS } from "@/common/constants/knownModels";
 import { usePolicy } from "@/browser/contexts/PolicyContext";
+import { supports1MContext } from "@/common/utils/ai/models";
 import { getAllowedProvidersForUi, isModelAllowedByPolicy } from "@/browser/utils/policyUi";
 import {
   LAST_CUSTOM_MODEL_PROVIDER_KEY,
@@ -72,6 +74,7 @@ export function ModelsSection() {
   const { defaultModel, setDefaultModel, hiddenModels, hideModel, unhideModel } =
     useModelsFromSettings();
   const gateway = useGateway();
+  const { has1MContext, toggle1MContext } = useProviderOptions();
 
   // Compaction model preference
   const [compactionModel, setCompactionModel] = usePersistedState<string>(
@@ -355,6 +358,7 @@ export function ModelsSection() {
                       saving={false}
                       hasActiveEdit={editing !== null}
                       isGatewayEnabled={gateway.modelUsesGateway(model.fullId)}
+                      is1MContextEnabled={has1MContext(model.fullId)}
                       onSetDefault={() => setDefaultModel(model.fullId)}
                       onStartEdit={() => handleStartEdit(model.provider, model.modelId)}
                       onSaveEdit={handleSaveEdit}
@@ -372,6 +376,11 @@ export function ModelsSection() {
                       onToggleGateway={
                         gateway.canToggleModel(model.fullId)
                           ? () => gateway.toggleModelGateway(model.fullId)
+                          : undefined
+                      }
+                      onToggle1MContext={
+                        supports1MContext(model.fullId)
+                          ? () => toggle1MContext(model.fullId)
                           : undefined
                       }
                     />
@@ -403,6 +412,7 @@ export function ModelsSection() {
                   isDefault={defaultModel === model.fullId}
                   isEditing={false}
                   isGatewayEnabled={gateway.modelUsesGateway(model.fullId)}
+                  is1MContextEnabled={has1MContext(model.fullId)}
                   onSetDefault={() => setDefaultModel(model.fullId)}
                   isHiddenFromSelector={hiddenModels.includes(model.fullId)}
                   onToggleVisibility={() =>
@@ -413,6 +423,11 @@ export function ModelsSection() {
                   onToggleGateway={
                     gateway.canToggleModel(model.fullId)
                       ? () => gateway.toggleModelGateway(model.fullId)
+                      : undefined
+                  }
+                  onToggle1MContext={
+                    supports1MContext(model.fullId)
+                      ? () => toggle1MContext(model.fullId)
                       : undefined
                   }
                 />
