@@ -52,6 +52,11 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_DELAY_MS = 100;
 const MAX_DELAY_MS = 10000;
 
+// Startup auth probe: if the initial WS handshake fails with an abnormal closure (1006),
+// browsers often hide the underlying HTTP status (401/403). We fetch /api/spec.json to
+// infer whether auth is required, but the probe must never block reconnect progress.
+const AUTH_PROBE_TIMEOUT_MS = 2000;
+
 // Liveness check constants
 const LIVENESS_INTERVAL_MS = 5000; // Check every 5 seconds
 const LIVENESS_TIMEOUT_MS = 3000; // Ping must respond within 3 seconds
@@ -147,6 +152,14 @@ export const APIProvider = (props: APIProviderProps) => {
   const connectionIdRef = useRef(0);
   const forceReconnectInProgressRef = useRef(false);
 
+  // When we decide the user needs to provide a token, stop the reconnect loop.
+  //
+  // Otherwise, the WebSocket close event (triggered by cleanup()) can schedule a reconnect
+  // which immediately flips the UI back to "reconnecting", causing the AuthTokenModal
+  // to flicker.
+  const authRequiredRef = useRef(false);
+
+  const authProbeAttemptedRef = useRef(false);
   const wsFactory = useMemo(
     () => props.createWebSocket ?? ((url: string) => new WebSocket(url)),
     [props.createWebSocket]
@@ -155,6 +168,8 @@ export const APIProvider = (props: APIProviderProps) => {
   const connect = useCallback(
     (token: string | null) => {
       const connectionId = ++connectionIdRef.current;
+
+      authRequiredRef.current = false;
 
       // This connect() call supersedes any prior pending reconnect or active connection.
       if (reconnectTimeoutRef.current) {
@@ -200,6 +215,7 @@ export const APIProvider = (props: APIProviderProps) => {
               return;
             }
 
+            authRequiredRef.current = false;
             hasConnectedRef.current = true;
             reconnectAttemptRef.current = 0;
             consecutivePingFailuresRef.current = 0;
@@ -214,7 +230,6 @@ export const APIProvider = (props: APIProviderProps) => {
               return;
             }
 
-            cleanup();
             forceReconnectInProgressRef.current = false;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errMsgLower = errMsg.toLowerCase();
@@ -223,12 +238,18 @@ export const APIProvider = (props: APIProviderProps) => {
               errMsgLower.includes("401") ||
               errMsgLower.includes("auth token") ||
               errMsgLower.includes("authentication");
+
             if (isAuthError) {
+              authRequiredRef.current = true;
               clearStoredAuthToken();
+              hasConnectedRef.current = false; // Reset - need fresh auth
               setState({ status: "auth_required", error: token ? "Invalid token" : undefined });
-            } else {
-              setState({ status: "error", error: errMsg });
+              cleanup();
+              return;
             }
+
+            cleanup();
+            setState({ status: "error", error: errMsg });
           });
       });
 
@@ -250,14 +271,97 @@ export const APIProvider = (props: APIProviderProps) => {
 
         forceReconnectInProgressRef.current = false;
 
+        // If we've already decided auth is required (e.g. via ping error), don't immediately
+        // overwrite the modal with a reconnect attempt.
         // Auth-specific close codes
         if (event.code === 1008 || event.code === 4401) {
+          authRequiredRef.current = true;
           clearStoredAuthToken();
           hasConnectedRef.current = false; // Reset - need fresh auth
           setState({ status: "auth_required", error: "Authentication required" });
           return;
         }
 
+        if (authRequiredRef.current) {
+          return;
+        }
+
+        // If this is the initial connection attempt and the WS handshake failed, browsers often
+        // collapse HTTP auth errors (401/403) into an abnormal closure (1006) with no status.
+        //
+        // If the backend is reachable over HTTP, we can use the OpenAPI spec to disambiguate:
+        // the server includes a `security` stanza when a bearer token is required.
+        if (
+          !hasConnectedRef.current &&
+          !token &&
+          event.code === 1006 &&
+          !authProbeAttemptedRef.current
+        ) {
+          authProbeAttemptedRef.current = true;
+
+          const apiBaseUrl = getBrowserBackendBaseUrl();
+          const specUrl = new URL(`${apiBaseUrl}/api/spec.json`);
+
+          type AuthProbeResult = "requires_auth" | "no_auth" | "unknown";
+
+          const controller = new AbortController();
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+          // `fetch` has no builtin timeout, and some environments don't reliably reject on abort.
+          // Use a race so the probe cannot hang the connection loop.
+          const timeoutPromise = new Promise<AuthProbeResult>((resolve) => {
+            timeoutId = setTimeout(() => {
+              controller.abort();
+              resolve("unknown");
+            }, AUTH_PROBE_TIMEOUT_MS);
+          });
+
+          const fetchPromise: Promise<AuthProbeResult> = fetch(specUrl, {
+            signal: controller.signal,
+          })
+            .then(async (res): Promise<AuthProbeResult> => {
+              if (!res.ok) return "unknown";
+
+              try {
+                const spec = (await res.json()) as { security?: unknown };
+                const requiresAuth = Array.isArray(spec.security) && spec.security.length > 0;
+                return requiresAuth ? "requires_auth" : "no_auth";
+              } catch {
+                return "unknown";
+              }
+            })
+            .catch((): AuthProbeResult => "unknown");
+
+          void Promise.race([fetchPromise, timeoutPromise])
+            .then((result) => {
+              if (connectionId !== connectionIdRef.current) {
+                return;
+              }
+
+              if (result === "requires_auth") {
+                authRequiredRef.current = true;
+                clearStoredAuthToken();
+                hasConnectedRef.current = false; // Reset - need fresh auth
+                setState({ status: "auth_required", error: "Authentication required" });
+                return;
+              }
+
+              if (result === "unknown") {
+                // Probe was inconclusive (timeout, network error, non-OK, invalid JSON). Allow re-probe
+                // on a later initial-handshake failure.
+                authProbeAttemptedRef.current = false;
+              }
+
+              scheduleReconnectRef.current?.();
+            })
+            .finally(() => {
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+              }
+            });
+
+          return;
+        }
         // If we were previously connected, try to reconnect
         if (hasConnectedRef.current) {
           scheduleReconnectRef.current?.();
@@ -281,7 +385,10 @@ export const APIProvider = (props: APIProviderProps) => {
 
     const attempt = reconnectAttemptRef.current;
     if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-      setState({ status: "error", error: "Connection lost. Please refresh the page." });
+      const error = hasConnectedRef.current
+        ? "Connection lost. Please refresh the page."
+        : "Failed to connect to the Mux backend after multiple attempts.";
+      setState({ status: "error", error });
       return;
     }
 
@@ -369,6 +476,7 @@ export const APIProvider = (props: APIProviderProps) => {
 
   const authenticate = useCallback(
     (token: string) => {
+      authProbeAttemptedRef.current = false;
       setStoredAuthToken(token);
       setAuthToken(token);
       connect(token);
@@ -377,6 +485,7 @@ export const APIProvider = (props: APIProviderProps) => {
   );
 
   const retry = useCallback(() => {
+    authProbeAttemptedRef.current = false;
     connect(authToken);
   }, [connect, authToken]);
 
