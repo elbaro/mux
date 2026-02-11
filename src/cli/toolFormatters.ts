@@ -5,6 +5,7 @@
  * with emoji prefixes and structured output similar to the frontend UI.
  */
 
+import { extractToolFilePath } from "@/common/utils/tools/toolInputFilePath";
 import chalk from "chalk";
 import type { ToolCallStartEvent, ToolCallEndEvent } from "@/common/types/stream";
 import type {
@@ -12,9 +13,7 @@ import type {
   BashToolResult,
   FileReadToolArgs,
   FileReadToolResult,
-  FileEditReplaceStringToolArgs,
   FileEditReplaceStringToolResult,
-  FileEditInsertToolArgs,
   FileEditInsertToolResult,
   TaskToolArgs,
   TaskToolResult,
@@ -45,6 +44,10 @@ const TOOL_BLOCK_SEPARATOR = chalk.dim("─".repeat(40));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function extractFilePathArg(args: unknown): string | undefined {
+  return extractToolFilePath(args);
 }
 
 function formatFilePath(filePath: string): string {
@@ -109,15 +112,16 @@ function renderUnknown(value: unknown): string {
 // ============================================================================
 
 function formatFileEditStart(_toolName: string, args: unknown): string | null {
-  const editArgs = args as FileEditReplaceStringToolArgs | FileEditInsertToolArgs;
-  if (!editArgs?.file_path) return null;
+  const filePath = extractFilePathArg(args);
+  if (!filePath) return null;
 
-  return `✏️  ${formatFilePath(editArgs.file_path)}`;
+  return `✏️  ${formatFilePath(filePath)}`;
 }
 
 function formatFileReadStart(_toolName: string, args: unknown): string | null {
   const readArgs = args as FileReadToolArgs;
-  if (!readArgs?.file_path) return null;
+  const filePath = extractFilePathArg(args);
+  if (!filePath) return null;
 
   let suffix = "";
   if (readArgs.offset != null || readArgs.limit != null) {
@@ -127,7 +131,7 @@ function formatFileReadStart(_toolName: string, args: unknown): string | null {
     suffix = chalk.dim(` (${parts.join(", ")})`);
   }
 
-  return `📖 ${formatFilePath(readArgs.file_path)}${suffix}`;
+  return `📖 ${formatFilePath(filePath)}${suffix}`;
 }
 
 function formatBashStart(_toolName: string, args: unknown): string | null {

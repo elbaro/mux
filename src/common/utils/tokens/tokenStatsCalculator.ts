@@ -7,6 +7,7 @@
  */
 
 import type { MuxMessage } from "@/common/types/message";
+import { extractToolFilePath } from "@/common/utils/tools/toolInputFilePath";
 import type { ChatStats, TokenConsumer } from "@/common/types/chatStats";
 import {
   getTokenizerForModel,
@@ -119,22 +120,13 @@ async function countToolOutputTokens(
   return countTokensForData(outputData, tokenizer);
 }
 
-/** Tools that operate on files - all use file_path property */
+/** Tools that operate on files - canonical input uses `path` (with legacy `file_path` fallback). */
 const FILE_PATH_TOOLS = new Set([
   "file_read",
   "file_edit_insert",
   "file_edit_replace_string",
   "file_edit_replace_lines",
 ]);
-
-function hasFilePath(input: unknown): input is { file_path: string } {
-  return (
-    typeof input === "object" &&
-    input !== null &&
-    "file_path" in input &&
-    typeof (input as { file_path: unknown }).file_path === "string"
-  );
-}
 
 /**
  * Extracts file path from tool input for file operations.
@@ -143,7 +135,8 @@ function extractFilePathFromToolInput(toolName: string, input: unknown): string 
   if (!FILE_PATH_TOOLS.has(toolName)) {
     return undefined;
   }
-  return hasFilePath(input) ? input.file_path : undefined;
+
+  return extractToolFilePath(input);
 }
 
 /**
