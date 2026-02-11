@@ -48,10 +48,16 @@ describe("getSuggestedModels", () => {
     }
 
     const config: ProvidersConfigMap = {
-      openai: { apiKeySet: true, isConfigured: true, models: ["my-team-model"] },
-      [builtInProvider]: { apiKeySet: true, isConfigured: true, models: [builtInModelId] },
+      openai: { apiKeySet: true, isEnabled: true, isConfigured: true, models: ["my-team-model"] },
+      [builtInProvider]: {
+        apiKeySet: true,
+        isEnabled: true,
+        isConfigured: true,
+        models: [builtInModelId],
+      },
       "mux-gateway": {
         apiKeySet: true,
+        isEnabled: true,
         isConfigured: true,
         couponCodeSet: true,
         models: ["ignored"],
@@ -69,6 +75,28 @@ describe("getSuggestedModels", () => {
 
     // Built-ins should be present, but deduped against any custom entry
     expect(countOccurrences(suggested, builtIn)).toBe(1);
+  });
+
+  test("skips custom models from disabled providers", () => {
+    const config: ProvidersConfigMap = {
+      openai: {
+        apiKeySet: true,
+        isEnabled: false,
+        isConfigured: false,
+        models: ["disabled-custom"],
+      },
+      anthropic: {
+        apiKeySet: true,
+        isEnabled: true,
+        isConfigured: true,
+        models: ["enabled-custom"],
+      },
+    };
+
+    const suggested = getSuggestedModels(config);
+
+    expect(suggested).toContain("anthropic:enabled-custom");
+    expect(suggested).not.toContain("openai:disabled-custom");
   });
 });
 
@@ -94,7 +122,7 @@ describe("useModelsFromSettings OpenAI Codex OAuth gating", () => {
 
   test("codex oauth only: hides API-key-only OpenAI models", () => {
     providersConfig = {
-      openai: { apiKeySet: false, isConfigured: true, codexOauthSet: true },
+      openai: { apiKeySet: false, isEnabled: true, isConfigured: true, codexOauthSet: true },
     };
 
     const { result } = renderHook(() => useModelsFromSettings());
@@ -106,7 +134,7 @@ describe("useModelsFromSettings OpenAI Codex OAuth gating", () => {
 
   test("api key only: hides Codex OAuth required OpenAI models", () => {
     providersConfig = {
-      openai: { apiKeySet: true, isConfigured: true, codexOauthSet: false },
+      openai: { apiKeySet: true, isEnabled: true, isConfigured: true, codexOauthSet: false },
     };
 
     const { result } = renderHook(() => useModelsFromSettings());
@@ -118,7 +146,7 @@ describe("useModelsFromSettings OpenAI Codex OAuth gating", () => {
 
   test("api key + codex oauth: allows all OpenAI models", () => {
     providersConfig = {
-      openai: { apiKeySet: true, isConfigured: true, codexOauthSet: true },
+      openai: { apiKeySet: true, isEnabled: true, isConfigured: true, codexOauthSet: true },
     };
 
     const { result } = renderHook(() => useModelsFromSettings());
@@ -130,7 +158,7 @@ describe("useModelsFromSettings OpenAI Codex OAuth gating", () => {
 
   test("neither: hides Codex OAuth required OpenAI models (status quo)", () => {
     providersConfig = {
-      openai: { apiKeySet: false, isConfigured: false, codexOauthSet: false },
+      openai: { apiKeySet: false, isEnabled: true, isConfigured: false, codexOauthSet: false },
     };
 
     const { result } = renderHook(() => useModelsFromSettings());
@@ -142,7 +170,7 @@ describe("useModelsFromSettings OpenAI Codex OAuth gating", () => {
 
   test("exposes OpenAI auth state flags", () => {
     providersConfig = {
-      openai: { apiKeySet: false, isConfigured: true, codexOauthSet: true },
+      openai: { apiKeySet: false, isEnabled: true, isConfigured: true, codexOauthSet: true },
     };
 
     const { result } = renderHook(() => useModelsFromSettings());

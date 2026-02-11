@@ -433,8 +433,9 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
   });
   const { startSequence: startTutorial } = useTutorial();
 
-  // Track if OpenAI API key is configured for voice input
+  // Track OpenAI provider voice prerequisites from Settings → Providers.
   const [openAIKeySet, setOpenAIKeySet] = useState(false);
+  const [openAIProviderEnabled, setOpenAIProviderEnabled] = useState(true);
 
   // Voice input - appends transcribed text to input
   const voiceInput = useVoiceInput({
@@ -449,9 +450,14 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     },
     onSend: () => void handleSend(),
     openAIKeySet,
+    openAIProviderEnabled,
     useRecordingKeybinds: true,
     api,
   });
+
+  const voiceInputUnavailableMessage = !voiceInput.isProviderEnabled
+    ? "Voice input is disabled because OpenAI provider is turned off. Enable it in Settings → Providers."
+    : "Voice input requires OpenAI API key. Configure in Settings → Providers.";
 
   // Start creation tutorial when entering creation mode
   useEffect(() => {
@@ -1224,7 +1230,7 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     };
   }, [api, variant, workspaceId, atMentionProjectPath, sendMessageOptions.disableWorkspaceAgents]);
 
-  // Voice input: track whether OpenAI API key is configured (subscribe to provider config changes)
+  // Voice input: track OpenAI key + enabled state (subscribe to provider config changes)
   useEffect(() => {
     if (!api) return;
 
@@ -1240,6 +1246,7 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
         const config = await api.providers.getConfig();
         if (!signal.aborted) {
           setOpenAIKeySet(config?.openai?.apiKeySet ?? false);
+          setOpenAIProviderEnabled(config?.openai?.isEnabled ?? true);
         }
       } catch {
         // Ignore errors fetching config
@@ -1371,10 +1378,10 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     if (!voiceInput.shouldShowUI) return;
 
     const handleToggle = () => {
-      if (!voiceInput.isApiKeySet) {
+      if (!voiceInput.isProviderEnabled || !voiceInput.isApiKeySet) {
         pushToast({
           type: "error",
-          message: "Voice input requires OpenAI API key. Configure in Settings → Providers.",
+          message: voiceInputUnavailableMessage,
         });
         return;
       }
@@ -1385,7 +1392,7 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     return () => {
       window.removeEventListener(CUSTOM_EVENTS.TOGGLE_VOICE_INPUT, handleToggle as EventListener);
     };
-  }, [voiceInput, pushToast]);
+  }, [voiceInput, pushToast, voiceInputUnavailableMessage]);
 
   // Auto-focus chat input when workspace changes (workspace only).
   const workspaceIdForFocus = variant === "workspace" ? props.workspaceId : null;
@@ -2130,10 +2137,10 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
     // Handle voice input toggle (Ctrl+D / Cmd+D)
     if (matchesKeybind(e, KEYBINDS.TOGGLE_VOICE_INPUT) && voiceInput.shouldShowUI) {
       e.preventDefault();
-      if (!voiceInput.isApiKeySet) {
+      if (!voiceInput.isProviderEnabled || !voiceInput.isApiKeySet) {
         pushToast({
           type: "error",
-          message: "Voice input requires OpenAI API key. Configure in Settings → Providers.",
+          message: voiceInputUnavailableMessage,
         });
         return;
       }
@@ -2147,6 +2154,7 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
       !e.repeat &&
       input.trim() === "" &&
       voiceInput.shouldShowUI &&
+      voiceInput.isProviderEnabled &&
       voiceInput.isApiKeySet &&
       voiceInput.state === "idle"
     ) {
@@ -2403,6 +2411,7 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
                   <VoiceInputButton
                     state={voiceInput.state}
                     isApiKeySet={voiceInput.isApiKeySet}
+                    isProviderEnabled={voiceInput.isProviderEnabled}
                     shouldShowUI={voiceInput.shouldShowUI}
                     requiresSecureContext={voiceInput.requiresSecureContext}
                     onToggle={voiceInput.toggle}

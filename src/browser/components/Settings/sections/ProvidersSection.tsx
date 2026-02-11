@@ -1014,10 +1014,40 @@ export function ProvidersSection() {
     [api, updateOptimistically]
   );
 
+  const isEnabled = (provider: string): boolean => {
+    return config?.[provider]?.isEnabled ?? true;
+  };
+
   /** Check if provider is configured (uses backend-computed isConfigured) */
   const isConfigured = (provider: string): boolean => {
     return config?.[provider]?.isConfigured ?? false;
   };
+
+  const hasAnyConfiguredProvider = useMemo(
+    () => Object.values(config ?? {}).some((providerConfig) => providerConfig.isConfigured),
+    [config]
+  );
+
+  const handleProviderEnabledChange = useCallback(
+    (provider: string, nextEnabled: boolean) => {
+      if (!api || provider === "mux-gateway") {
+        return;
+      }
+
+      updateOptimistically(provider, {
+        isEnabled: nextEnabled,
+        ...(nextEnabled ? {} : { isConfigured: false }),
+      });
+
+      // Persist only `enabled: false` for disabled providers. Re-enabling removes the key.
+      void api.providers.setProviderConfig({
+        provider,
+        keyPath: ["enabled"],
+        value: nextEnabled ? "" : "false",
+      });
+    },
+    [api, updateOptimistically]
+  );
 
   const getFieldValue = (provider: string, field: string): string | undefined => {
     const providerConfig = config?.[provider];
@@ -1074,8 +1104,15 @@ export function ProvidersSection() {
 
       {visibleProviders.map((provider) => {
         const isExpanded = expandedProvider === provider;
+        const enabled = isEnabled(provider);
         const configured = isConfigured(provider);
         const fields = getProviderFields(provider);
+        const statusDotColor = !enabled
+          ? "bg-warning"
+          : configured
+            ? "bg-success"
+            : "bg-border-medium";
+        const statusDotTitle = !enabled ? "Disabled" : configured ? "Configured" : "Not configured";
 
         return (
           <div
@@ -1100,15 +1137,31 @@ export function ProvidersSection() {
                   className="text-foreground text-sm font-medium"
                 />
               </div>
-              <div
-                className={`h-2 w-2 rounded-full ${configured ? "bg-green-500" : "bg-border-medium"}`}
-                title={configured ? "Configured" : "Not configured"}
-              />
+              <div className={`h-2 w-2 rounded-full ${statusDotColor}`} title={statusDotTitle} />
             </Button>
 
             {/* Provider settings */}
             {isExpanded && (
               <div className="border-border-medium space-y-3 border-t px-4 py-3">
+                {provider !== "mux-gateway" && (
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <label className="text-foreground block text-xs font-medium">Enabled</label>
+                      <span className="text-muted text-xs">
+                        Disable this provider without deleting saved credentials.
+                      </span>
+                    </div>
+                    <Switch
+                      checked={enabled}
+                      onCheckedChange={(nextChecked) =>
+                        handleProviderEnabledChange(provider, nextChecked)
+                      }
+                      aria-label={`Toggle ${provider} provider`}
+                      disabled={!api}
+                    />
+                  </div>
+                )}
+
                 {/* Quick link to get API key */}
                 {PROVIDER_KEY_URLS[provider] && (
                   <div className="space-y-1">
@@ -1707,6 +1760,13 @@ export function ProvidersSection() {
           </div>
         );
       })}
+
+      {config && !hasAnyConfiguredProvider && (
+        <div className="border-warning/40 bg-warning/10 text-warning rounded-md border px-3 py-2 text-xs">
+          No providers are currently enabled. You won&apos;t be able to send messages until you
+          enable a provider.
+        </div>
+      )}
     </div>
   );
 }

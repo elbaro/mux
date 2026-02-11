@@ -7,6 +7,7 @@ import type {
   ProviderConfigInfo,
   ProvidersConfigMap,
 } from "@/common/orpc/types";
+import { isProviderDisabledInConfig } from "@/common/utils/providers/isProviderDisabled";
 import { log } from "@/node/services/log";
 import { checkProviderConfigured } from "@/node/utils/providerRequirements";
 import { parseCodexOauthAuth } from "@/node/utils/codexOauthAuth";
@@ -78,6 +79,8 @@ export class ProviderService {
         bearerToken?: string;
         accessKeyId?: string;
         secretAccessKey?: string;
+        /** Persisted provider toggle: only `false` is stored; missing means enabled. */
+        enabled?: unknown;
         /** OpenAI-only: stored Codex OAuth tokens (never sent to frontend). */
         codexOauth?: unknown;
       };
@@ -98,9 +101,12 @@ export class ProviderService {
 
       const codexOauthSet =
         provider === "openai" && parseCodexOauthAuth(config.codexOauth) !== null;
+      const isEnabled = !isProviderDisabledInConfig(config);
 
       const providerInfo: ProviderConfigInfo = {
         apiKeySet: !!config.apiKey,
+        // Users can disable providers without removing credentials from providers.jsonc.
+        isEnabled,
         isConfigured: false, // computed below
         baseUrl: forcedBaseUrl ?? config.baseUrl,
         models: filteredModels,
@@ -143,10 +149,12 @@ export class ProviderService {
         providerInfo.couponCodeSet = !!(muxConfig.couponCode ?? muxConfig.voucher);
       }
 
-      // Compute isConfigured using shared utility (checks config + env vars)
-      providerInfo.isConfigured = checkProviderConfigured(provider, config).isConfigured;
+      // Compute isConfigured using shared utility (checks config + env vars).
+      // Disabled providers intentionally surface as not configured in the UI.
+      providerInfo.isConfigured =
+        isEnabled && checkProviderConfigured(provider, config).isConfigured;
 
-      if (provider === "openai" && codexOauthSet) {
+      if (provider === "openai" && isEnabled && codexOauthSet) {
         providerInfo.isConfigured = true;
       }
 
@@ -240,7 +248,16 @@ export class ProviderService {
 
       if (keyPath.length > 0) {
         const lastKey = keyPath[keyPath.length - 1];
-        if (value === undefined) {
+        const isProviderEnabledToggle = keyPath.length === 1 && lastKey === "enabled";
+
+        if (isProviderEnabledToggle) {
+          // Persist only `enabled: false` and delete on enable so providers.jsonc stays minimal.
+          if (value === false || value === "false") {
+            current[lastKey] = false;
+          } else {
+            delete current[lastKey];
+          }
+        } else if (value === undefined) {
           delete current[lastKey];
         } else {
           current[lastKey] = value;
@@ -300,8 +317,17 @@ export class ProviderService {
 
       if (keyPath.length > 0) {
         const lastKey = keyPath[keyPath.length - 1];
-        // Delete key if value is empty string (used for clearing API keys), otherwise set it
-        if (value === "") {
+        const isProviderEnabledToggle = keyPath.length === 1 && lastKey === "enabled";
+
+        if (isProviderEnabledToggle) {
+          // Persist only `enabled: false` and delete on enable so providers.jsonc stays minimal.
+          if (value === "false") {
+            current[lastKey] = false;
+          } else {
+            delete current[lastKey];
+          }
+        } else if (value === "") {
+          // Delete key if value is empty string (used for clearing API keys).
           delete current[lastKey];
         } else {
           current[lastKey] = value;

@@ -16,7 +16,7 @@ describe("buildStreamErrorEventData", () => {
     });
 
     expect(result.errorType).toBe("authentication");
-    expect(result.error).toContain("openai");
+    expect(result.error).toContain("OpenAI");
     expect(result.messageId).toMatch(/^assistant-/);
   });
 });
@@ -73,7 +73,7 @@ describe("formatSendMessageError", () => {
     });
 
     expect(result.errorType).toBe("authentication");
-    expect(result.message).toContain("anthropic");
+    expect(result.message).toContain("Anthropic");
     expect(result.message).toContain("API key");
   });
 
@@ -86,6 +86,17 @@ describe("formatSendMessageError", () => {
     expect(result.errorType).toBe("unknown");
     expect(result.message).toContain("unsupported-provider");
     expect(result.message).toContain("not supported");
+  });
+
+  test("formats provider_disabled as authentication", () => {
+    const result = formatSendMessageError({
+      type: "provider_disabled",
+      provider: "openai",
+    });
+
+    expect(result.errorType).toBe("authentication");
+    expect(result.message).toContain("OpenAI");
+    expect(result.message).toContain("disabled");
   });
 
   test("formats invalid_model_string with model_not_found errorType", () => {
