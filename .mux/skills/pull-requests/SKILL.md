@@ -87,7 +87,7 @@ When Codex leaves review comments, you **must** address them before the PR can m
 
 ### Structure
 
-PR bodies should generally follow this structure; omit sections that are N/A or trivially inferable for the change.
+PR bodies should generally follow this structure; omit sections that are N/A or trivially inferable from the code.
 
 - Summary
   - Single-paragraph executive summary of the change
@@ -96,6 +96,8 @@ PR bodies should generally follow this structure; omit sections that are N/A or 
   - What problem this solves
   - Relevant commits, issues, or PRs that capture more context
 - Implementation
+  - Explain anything novel or unclear about the implementation approach
+  - Keep it generally high-level and architectural
 - Validation
   - Steps taken to prove the change works as intended
   - Avoid boilerplate like `ran tests`; include this section only for novel, change-specific steps
@@ -103,6 +105,17 @@ PR bodies should generally follow this structure; omit sections that are N/A or 
 - Risks
   - PRs that touch intricate logic must include an assessment of regression risk
   - Explain regression risk in terms of severity and affected product areas
+- Pains
+  - Only include for non-trivial changes that that took multiple iteration cycles
+  - Explain codebase or environment pains that slowed down planning, implementation, or validation
+
+### Edits
+
+Prefer storing the body in an out-of-tree file such as `/tmp/pr-<num>.txt`, using
+file edit tools to modify it, and then `gh pr edit [num] --body-file <file>` to update it.
+
+When updating the PR body, consider condensing information that is no longer important
+into a toggle.
 
 ## Upkeep
 
