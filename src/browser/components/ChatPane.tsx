@@ -7,7 +7,14 @@ import React, {
   useDeferredValue,
   useMemo,
 } from "react";
-import { Lightbulb } from "lucide-react";
+import { Clipboard, Lightbulb, TextQuote } from "lucide-react";
+import { copyToClipboard } from "@/browser/utils/clipboard";
+import {
+  formatTranscriptTextAsQuote,
+  getTranscriptContextMenuText,
+} from "@/browser/utils/messages/transcriptContextMenu";
+import { useContextMenuPosition } from "@/browser/hooks/useContextMenuPosition";
+import { PositionedMenu, PositionedMenuItem } from "./ui/positioned-menu";
 import { MessageListProvider } from "./Messages/MessageListContext";
 import { cn } from "@/common/lib/utils";
 import { MessageRenderer } from "./Messages/MessageRenderer";
@@ -357,6 +364,47 @@ export const ChatPane: React.FC<ChatPaneProps> = (props) => {
   // ChatInput API for focus management
   const chatInputAPI = useRef<ChatInputAPI | null>(null);
 
+  // Right-clicking transcript text offers quick quote/copy actions,
+  // using selection first and hovered text as a fallback when nothing is selected.
+  const transcriptMenu = useContextMenuPosition();
+  const transcriptMenuTextRef = useRef<string>("");
+
+  const handleTranscriptContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const transcriptRoot = contentRef.current;
+      if (!transcriptRoot) return;
+
+      const selection = typeof window === "undefined" ? null : window.getSelection();
+      const text = getTranscriptContextMenuText({
+        transcriptRoot,
+        target: event.target,
+        selection,
+      });
+
+      if (!text) {
+        transcriptMenu.close();
+        return;
+      }
+
+      transcriptMenuTextRef.current = text;
+      transcriptMenu.onContextMenu(event);
+    },
+    [contentRef, transcriptMenu]
+  );
+
+  const handleQuoteHoveredText = useCallback(() => {
+    const quotedText = formatTranscriptTextAsQuote(transcriptMenuTextRef.current.trim());
+    transcriptMenu.close();
+    if (!quotedText) return;
+    chatInputAPI.current?.appendText(quotedText);
+    chatInputAPI.current?.focus();
+  }, [transcriptMenu]);
+
+  const handleCopyHoveredText = useCallback(() => {
+    void copyToClipboard(transcriptMenuTextRef.current);
+    transcriptMenu.close();
+  }, [transcriptMenu]);
+
   // ChatPane is keyed by workspaceId (WorkspaceShell), so per-workspace UI state naturally
   // resets on workspace switches. Clear background errors so they don't leak across workspaces.
   useEffect(() => {
@@ -648,6 +696,7 @@ export const ChatPane: React.FC<ChatPaneProps> = (props) => {
               onWheel={markUserInteraction}
               onTouchMove={markUserInteraction}
               onScroll={handleScroll}
+              onContextMenu={handleTranscriptContextMenu}
               role="log"
               aria-live={canInterrupt ? "polite" : "off"}
               aria-busy={canInterrupt}
@@ -799,6 +848,22 @@ export const ChatPane: React.FC<ChatPaneProps> = (props) => {
                 />
               </div>
             </div>
+            <PositionedMenu
+              open={transcriptMenu.isOpen}
+              onOpenChange={transcriptMenu.onOpenChange}
+              position={transcriptMenu.position}
+            >
+              <PositionedMenuItem
+                icon={<TextQuote />}
+                label="Quote in input"
+                onClick={handleQuoteHoveredText}
+              />
+              <PositionedMenuItem
+                icon={<Clipboard />}
+                label="Copy text"
+                onClick={handleCopyHoveredText}
+              />
+            </PositionedMenu>
             {!autoScroll && (
               <button
                 onClick={jumpToBottom}
