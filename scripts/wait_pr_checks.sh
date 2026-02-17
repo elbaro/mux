@@ -1,15 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wait for PR checks to complete
-# Usage: ./scripts/wait_pr_checks.sh <pr_number>
+# Wait for PR checks to complete.
+# Usage: ./scripts/wait_pr_checks.sh <pr_number> [--once]
+#
+# Exits:
+#   0 - PR checks and mergeability gates passed
+#   1 - terminal failure (conflicts, failing checks, unresolved comments, etc.)
+#  10 - still waiting for checks/mergeability (only in --once mode)
 
-if [ $# -eq 0 ]; then
-  echo "Usage: $0 <pr_number>"
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+  echo "Usage: $0 <pr_number> [--once]"
   exit 1
 fi
 
 PR_NUMBER=$1
+MODE="wait"
+
+if [ $# -eq 2 ]; then
+  if [ "$2" = "--once" ]; then
+    MODE="once"
+  else
+    echo "❌ Unknown argument: '$2'" >&2
+    echo "Usage: $0 <pr_number> [--once]" >&2
+    exit 1
+  fi
+fi
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+CHECK_REVIEWS_SCRIPT="$SCRIPT_DIR/check_pr_reviews.sh"
+CHECK_CODEX_COMMENTS_SCRIPT="$SCRIPT_DIR/check_codex_comments.sh"
+
+if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+  echo "❌ PR number must be numeric. Got: '$PR_NUMBER'" >&2
+  exit 1
+fi
+
+for helper in "$CHECK_REVIEWS_SCRIPT" "$CHECK_CODEX_COMMENTS_SCRIPT"; do
+  if [ ! -x "$helper" ]; then
+    echo "❌ assertion failed: missing executable helper script: $helper" >&2
+    exit 1
+  fi
+done
 
 # Check for dirty working tree
 if ! git diff-index --quiet HEAD --; then
@@ -73,110 +105,215 @@ if [[ "$LOCAL_HASH" != "$REMOTE_HASH" ]]; then
   exit 1
 fi
 
-echo "⏳ Waiting for PR #$PR_NUMBER checks to complete..."
-echo ""
+LAST_MERGE_STATE="UNKNOWN"
 
-while true; do
+CHECK_PR_CHECKS_ONCE() {
+  local status
+  local pr_state
+  local mergeable
+  local merge_state
+  local checks
+
   # Get PR status
-  STATUS=$(gh pr view "$PR_NUMBER" --json mergeable,mergeStateStatus,state 2>/dev/null || echo "error")
+  status=$(gh pr view "$PR_NUMBER" --json mergeable,mergeStateStatus,state 2>/dev/null || echo "error")
 
-  if [ "$STATUS" = "error" ]; then
+  if [ "$status" = "error" ]; then
     echo "❌ Failed to get PR status. Does PR #$PR_NUMBER exist?"
-    exit 1
+    return 1
   fi
 
-  PR_STATE=$(echo "$STATUS" | jq -r '.state')
+  pr_state=$(echo "$status" | jq -r '.state')
 
-  # Check if PR is already merged
-  if [ "$PR_STATE" = "MERGED" ]; then
-    echo "✅ PR #$PR_NUMBER has been merged!"
-    exit 0
-  fi
+  case "$pr_state" in
+    MERGED)
+      echo "✅ PR #$PR_NUMBER has been merged!"
+      return 0
+      ;;
+    CLOSED)
+      echo "❌ PR #$PR_NUMBER is closed (not merged)!"
+      return 1
+      ;;
+    OPEN) ;;
+    *)
+      echo "❌ assertion failed: unexpected PR state '$pr_state' for PR #$PR_NUMBER" >&2
+      return 1
+      ;;
+  esac
 
-  # Check if PR is closed without merging
-  if [ "$PR_STATE" = "CLOSED" ]; then
-    echo "❌ PR #$PR_NUMBER is closed (not merged)!"
-    exit 1
-  fi
+  mergeable=$(echo "$status" | jq -r '.mergeable')
+  merge_state=$(echo "$status" | jq -r '.mergeStateStatus')
+  LAST_MERGE_STATE="$merge_state"
 
-  MERGEABLE=$(echo "$STATUS" | jq -r '.mergeable')
-  MERGE_STATE=$(echo "$STATUS" | jq -r '.mergeStateStatus')
+  case "$mergeable" in
+    MERGEABLE | CONFLICTING | UNKNOWN) ;;
+    *)
+      echo "❌ assertion failed: unexpected mergeable status '$mergeable' for PR #$PR_NUMBER" >&2
+      return 1
+      ;;
+  esac
+
+  case "$merge_state" in
+    BEHIND | BLOCKED | CLEAN | DIRTY | DRAFT | HAS_HOOKS | UNKNOWN | UNSTABLE) ;;
+    *)
+      echo "❌ assertion failed: unexpected merge state '$merge_state' for PR #$PR_NUMBER" >&2
+      return 1
+      ;;
+  esac
 
   # Check for bad merge status
-  if [ "$MERGEABLE" = "CONFLICTING" ]; then
+  if [ "$mergeable" = "CONFLICTING" ]; then
     echo "❌ PR has merge conflicts!"
-    exit 1
+    return 1
   fi
 
-  if [ "$MERGE_STATE" = "DIRTY" ]; then
+  if [ "$merge_state" = "DIRTY" ]; then
     echo "❌ PR has merge conflicts!"
-    exit 1
+    return 1
   fi
 
-  if [ "$MERGE_STATE" = "BEHIND" ]; then
+  if [ "$merge_state" = "BEHIND" ]; then
     echo "❌ PR is behind base branch. Rebase needed."
     echo ""
     echo "Run:"
     echo "  git fetch origin"
     echo "  git rebase origin/main"
     echo "  git push --force-with-lease"
-    exit 1
+    return 1
   fi
 
   # Get check status
-  CHECKS=$(gh pr checks "$PR_NUMBER" 2>&1 || echo "pending")
+  checks=$(gh pr checks "$PR_NUMBER" 2>&1 || echo "pending")
+
+  local has_fail=0
+  local has_pending=0
+  local has_pass=0
+
+  if echo "$checks" | grep -q "fail"; then
+    has_fail=1
+  fi
+
+  if echo "$checks" | grep -q "pending"; then
+    has_pending=1
+  fi
+
+  if echo "$checks" | grep -q "pass"; then
+    has_pass=1
+  fi
+
+  if [ "$has_fail" -eq 0 ] && [ "$has_pending" -eq 0 ] && [ "$has_pass" -eq 0 ]; then
+    echo "❌ assertion failed: unable to classify 'gh pr checks' output for PR #$PR_NUMBER" >&2
+    echo "$checks" >&2
+    return 1
+  fi
 
   # Check for failures
-  if echo "$CHECKS" | grep -q "fail"; then
+  if [ "$has_fail" -eq 1 ]; then
     echo "❌ Some checks failed:"
     echo ""
     gh pr checks "$PR_NUMBER"
     echo ""
     echo "💡 To extract detailed logs from the failed run:"
     echo "   ./scripts/extract_pr_logs.sh $PR_NUMBER"
-    echo "   ./scripts/extract_pr_logs.sh $PR_NUMBER <job_pattern>  # e.g., Integration"
+    echo "   ./scripts/extract_pr_logs.sh $PR_NUMBER <job_pattern>"
+    echo ""
+    echo "💡 Common local repro commands for this repo:"
+    echo "   make static-check"
+    echo "   make test"
     echo ""
     echo "💡 To re-run a subset of integration tests faster with workflow_dispatch:"
     echo "   gh workflow run ci.yml --ref $(git rev-parse --abbrev-ref HEAD) -f test_filter=\"tests/integration/specificTest.test.ts\""
     echo "   gh workflow run ci.yml --ref $(git rev-parse --abbrev-ref HEAD) -f test_filter=\"-t 'specific test name'\""
-    exit 1
+    return 1
   fi
 
   # Check for unresolved review comments in the hot loop
-  if ! ./scripts/check_pr_reviews.sh "$PR_NUMBER" >/dev/null 2>&1; then
+  if ! "$CHECK_REVIEWS_SCRIPT" "$PR_NUMBER" >/dev/null 2>&1; then
     echo ""
     echo "❌ Unresolved review comments found!"
     echo "   👉 Tip: run ./scripts/check_pr_reviews.sh $PR_NUMBER to list them."
-    ./scripts/check_pr_reviews.sh "$PR_NUMBER"
-    exit 1
+    "$CHECK_REVIEWS_SCRIPT" "$PR_NUMBER"
+    return 1
   fi
 
   # Check if all checks passed and merge state is clean
-  if echo "$CHECKS" | grep -q "pass" && ! echo "$CHECKS" | grep -qE "pending|fail"; then
-    if [ "$MERGE_STATE" = "CLEAN" ]; then
+  if [ "$has_pass" -eq 1 ] && [ "$has_pending" -eq 0 ] && [ "$has_fail" -eq 0 ]; then
+    if [ "$merge_state" = "CLEAN" ]; then
       # Check for unresolved Codex comments
       echo "✅ All checks passed!"
       echo ""
       gh pr checks "$PR_NUMBER"
       echo ""
       echo "🤖 Checking for unresolved Codex comments..."
-      if ./scripts/check_codex_comments.sh "$PR_NUMBER"; then
+      if "$CHECK_CODEX_COMMENTS_SCRIPT" "$PR_NUMBER"; then
         echo ""
         echo "✅ PR is ready to merge!"
-        exit 0
-      else
-        echo ""
-        echo "❌ Please resolve Codex comments before merging."
-        echo "   👉 Tip: use ./scripts/check_pr_reviews.sh $PR_NUMBER to list unresolved comments."
-        exit 1
+        return 0
       fi
-    elif [ "$MERGE_STATE" = "BLOCKED" ]; then
-      echo "⏳ All checks passed but still blocked (waiting for required checks)..."
+
+      echo ""
+      echo "❌ Please resolve Codex comments before merging."
+      echo "   👉 Tip: use ./scripts/check_pr_reviews.sh $PR_NUMBER to list unresolved comments."
+      return 1
     fi
-  else
-    # Show current status
-    echo -ne "\r⏳ Checks in progress... (${MERGE_STATE})  "
+
+    # GitHub can transiently report UNKNOWN/UNSTABLE/HAS_HOOKS even when checks have
+    # passed; treat these as still-pending rather than a terminal assertion failure.
+    case "$merge_state" in
+      BLOCKED | DRAFT | HAS_HOOKS | UNKNOWN | UNSTABLE)
+        return 10
+        ;;
+      *)
+        echo "❌ assertion failed: checks passed but merge state '$merge_state' is not supported" >&2
+        return 1
+        ;;
+    esac
   fi
 
-  sleep 5
+  return 10
+}
+
+if [ "$MODE" = "once" ]; then
+  if CHECK_PR_CHECKS_ONCE; then
+    rc=0
+  else
+    rc=$?
+  fi
+
+  case "$rc" in
+    0 | 1 | 10)
+      exit "$rc"
+      ;;
+    *)
+      echo "❌ assertion failed: unexpected checks status code '$rc'" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+echo "⏳ Waiting for PR #$PR_NUMBER checks to complete..."
+echo ""
+
+while true; do
+  if CHECK_PR_CHECKS_ONCE; then
+    rc=0
+  else
+    rc=$?
+  fi
+
+  case "$rc" in
+    0)
+      exit 0
+      ;;
+    1)
+      exit 1
+      ;;
+    10)
+      echo -ne "\r⏳ Checks in progress... (${LAST_MERGE_STATE})  "
+      sleep 5
+      ;;
+    *)
+      echo "❌ assertion failed: unexpected checks status code '$rc'" >&2
+      exit 1
+      ;;
+  esac
 done
