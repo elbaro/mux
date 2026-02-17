@@ -23,6 +23,9 @@ if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# Polling every 30s reduces GitHub API churn while still giving timely readiness updates.
+POLL_INTERVAL_SECS=30
+
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WAIT_CODEX_SCRIPT="$SCRIPT_DIR/wait_pr_codex.sh"
 WAIT_CHECKS_SCRIPT="$SCRIPT_DIR/wait_pr_checks.sh"
@@ -153,13 +156,15 @@ export MUX_GH_REPO
 export MUX_SKIP_FETCH_SYNC=1
 
 PR_DATA_FILE=$(mktemp)
+REACTIONS_SCAN_CACHE_FILE="${PR_DATA_FILE}.reactions-scan"
 cleanup() {
-  rm -f "$PR_DATA_FILE"
+  rm -f "$PR_DATA_FILE" "$REACTIONS_SCAN_CACHE_FILE"
 }
 trap cleanup EXIT
 
 # Share the latest PR GraphQL payload across child scripts to avoid duplicate API calls.
 export MUX_PR_DATA_FILE="$PR_DATA_FILE"
+export MUX_REACTIONS_SCAN_CACHE_FILE="$REACTIONS_SCAN_CACHE_FILE"
 
 echo "🚦 Waiting for PR #$PR_NUMBER to become ready (Codex + CI, fail-fast)..."
 echo ""
@@ -266,5 +271,5 @@ while true; do
     exit 1
   fi
 
-  sleep 5
+  sleep "$POLL_INTERVAL_SECS"
 done
