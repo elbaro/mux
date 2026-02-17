@@ -1062,6 +1062,139 @@ describe("StreamingMessageAggregator", () => {
     });
   });
 
+  describe("incremental stream replay", () => {
+    test("preserves last stream timestamp when replayed stream-start re-establishes context", () => {
+      const aggregator = new StreamingMessageAggregator(TEST_CREATED_AT);
+      const startTime = 1_000;
+      const deltaTimestamp = 1_250;
+
+      aggregator.handleStreamStart({
+        type: "stream-start",
+        workspaceId: "test-workspace",
+        messageId: "msg-replay-1",
+        historySequence: 1,
+        model: "claude-3-5-sonnet-20241022",
+        startTime,
+      });
+
+      aggregator.handleStreamDelta({
+        type: "stream-delta",
+        workspaceId: "test-workspace",
+        messageId: "msg-replay-1",
+        delta: "partial",
+        tokens: 1,
+        timestamp: deltaTimestamp,
+      });
+
+      const beforeReplayCursor = aggregator.getOnChatCursor();
+      expect(beforeReplayCursor?.stream?.lastTimestamp).toBe(deltaTimestamp);
+
+      // Since-mode reconnect can replay stream-start without replaying additional parts.
+      // Cursor timestamp must remain monotonic to avoid requesting duplicate events.
+      aggregator.handleStreamStart({
+        type: "stream-start",
+        workspaceId: "test-workspace",
+        messageId: "msg-replay-1",
+        historySequence: 1,
+        model: "claude-3-5-sonnet-20241022",
+        startTime,
+        replay: true,
+      });
+
+      const afterReplayCursor = aggregator.getOnChatCursor();
+      expect(afterReplayCursor?.stream?.lastTimestamp).toBe(deltaTimestamp);
+    });
+  });
+
+  describe("append replay cache invalidation", () => {
+    test("rebuilds displayed rows when append replay overwrites an existing message id", () => {
+      const aggregator = new StreamingMessageAggregator(TEST_CREATED_AT);
+
+      const partialMessage = createMuxMessage("msg-overwrite-1", "assistant", "partial", {
+        historySequence: 1,
+        timestamp: 1,
+      });
+      aggregator.loadHistoricalMessages([partialMessage], false);
+
+      const initialDisplayed = aggregator.getDisplayedMessages();
+      const initialAssistant = initialDisplayed.find(
+        (message): message is Extract<(typeof initialDisplayed)[number], { type: "assistant" }> =>
+          message.type === "assistant" && message.historyId === "msg-overwrite-1"
+      );
+      expect(initialAssistant).toBeDefined();
+      expect(initialAssistant?.content).toBe("partial");
+
+      const finalizedMessage = createMuxMessage("msg-overwrite-1", "assistant", "finalized", {
+        historySequence: 1,
+        timestamp: 2,
+      });
+      aggregator.loadHistoricalMessages([finalizedMessage], false, { mode: "append" });
+
+      const updatedDisplayed = aggregator.getDisplayedMessages();
+      const updatedAssistant = updatedDisplayed.find(
+        (message): message is Extract<(typeof updatedDisplayed)[number], { type: "assistant" }> =>
+          message.type === "assistant" && message.historyId === "msg-overwrite-1"
+      );
+
+      expect(updatedAssistant).toBeDefined();
+      expect(updatedAssistant?.content).toBe("finalized");
+      expect(updatedAssistant).not.toBe(initialAssistant);
+    });
+  });
+
+  test("keeps richer in-memory parts when append replay sends a stale duplicate", () => {
+    const aggregator = new StreamingMessageAggregator(TEST_CREATED_AT);
+
+    aggregator.handleStreamStart({
+      type: "stream-start",
+      workspaceId: "test-workspace",
+      messageId: "msg-stale-append",
+      historySequence: 1,
+      model: "claude-3-5-sonnet-20241022",
+      startTime: 1_000,
+    });
+
+    aggregator.handleToolCallStart({
+      type: "tool-call-start",
+      workspaceId: "test-workspace",
+      messageId: "msg-stale-append",
+      toolCallId: "tool-stale-append",
+      toolName: "bash",
+      args: { command: "echo hi" },
+      tokens: 1,
+      timestamp: 1_100,
+    });
+
+    aggregator.handleStreamDelta({
+      type: "stream-delta",
+      workspaceId: "test-workspace",
+      messageId: "msg-stale-append",
+      delta: "tool output pending",
+      tokens: 1,
+      timestamp: 1_200,
+    });
+
+    const existingMessage = aggregator
+      .getAllMessages()
+      .find((message) => message.id === "msg-stale-append");
+    expect(existingMessage).toBeDefined();
+    expect(existingMessage?.parts.length).toBeGreaterThan(1);
+
+    const staleReplayMessage = createMuxMessage("msg-stale-append", "assistant", "placeholder", {
+      historySequence: 1,
+      timestamp: 1_050,
+    });
+    aggregator.loadHistoricalMessages([staleReplayMessage], true, { mode: "append" });
+
+    const updatedMessage = aggregator
+      .getAllMessages()
+      .find((message) => message.id === "msg-stale-append");
+    expect(updatedMessage).toBeDefined();
+    expect(updatedMessage).toBe(existingMessage);
+    expect(updatedMessage?.parts.length).toBeGreaterThan(1);
+    expect(updatedMessage?.parts.some((part) => part.type === "dynamic-tool")).toBe(true);
+  });
+
   describe("compaction detection", () => {
     test("treats active stream as compacting on reconnect when stream-start has no mode", () => {
       const aggregator = new StreamingMessageAggregator(TEST_CREATED_AT);
