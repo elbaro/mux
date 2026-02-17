@@ -618,6 +618,7 @@ export class AIService extends EventEmitter {
         providerForMessages: canonicalProviderName,
         effectiveThinkingLevel,
         modelString,
+        anthropicCacheTtl: effectiveMuxProviderOptions.anthropic?.cacheTtl,
         workspaceId,
       });
 
@@ -955,7 +956,8 @@ export class AIService extends EventEmitter {
         hasQueuedMessage,
         metadata.name,
         effectiveThinkingLevel,
-        requestHeaders
+        requestHeaders,
+        effectiveMuxProviderOptions.anthropic?.cacheTtl ?? undefined
       );
 
       if (!streamResult.success) {
