@@ -269,12 +269,38 @@ export function mapModelCreationError(
  * - name: Codebase area with 4-char suffix (e.g., "sidebar-a1b2")
  * - title: Human-readable description (e.g., "Fix plan mode over SSH")
  */
+export function buildWorkspaceIdentityPrompt(
+  message: string,
+  conversationContext?: string,
+  latestUserMessage?: string
+): string {
+  const promptSections: string[] = [`Primary user objective: "${message}"`];
+
+  const trimmedConversationContext = conversationContext?.trim();
+  if (trimmedConversationContext && trimmedConversationContext.length > 0) {
+    promptSections.push(
+      `Conversation turns (first user message + latest turns, oldest to newest):\n${trimmedConversationContext.slice(0, 6_000)}`
+    );
+
+    const normalizedLatestUserMessage = latestUserMessage?.replace(/\s+/g, " ").trim();
+    if (normalizedLatestUserMessage) {
+      promptSections.push(
+        `Most recent user message (highest priority when it conflicts with older context): "${normalizedLatestUserMessage.slice(0, 1_000)}"`
+      );
+    }
+  }
+
+  return `Generate a workspace name and title for this development task:\n\n${promptSections.join("\n\n")}\n\nRequirements:\n- name: The area of the codebase being worked on (1-2 words, max 15 chars, git-safe: lowercase, hyphens only). Random bytes will be appended for uniqueness, so focus on the area not the specific task. Examples: "sidebar", "auth", "config", "api"\n- title: A 2-5 word description in verb-noun format. Examples: "Fix plan mode", "Add user authentication", "Refactor sidebar layout"\n- title guidance: Fit the long-term, overall purpose of the chat, not just the latest turn.\n- precedence: If older context conflicts, prioritize the most recent user message.`;
+}
+
 export async function generateWorkspaceIdentity(
   message: string,
   candidates: string[],
   aiService: AIService,
-  /** Optional prior assistant message for additional context (e.g. forked history). Truncated to 500 chars. */
-  assistantContext?: string
+  /** Optional conversation turns context used for regenerate-title prompts. */
+  conversationContext?: string,
+  /** Optional most recent user message; if present, prompt gives it precedence over older context. */
+  latestUserMessage?: string
 ): Promise<Result<GenerateWorkspaceIdentityResult, NameGenerationError>> {
   if (candidates.length === 0) {
     return Err({ type: "unknown", raw: "No model candidates provided for name generation" });
@@ -305,13 +331,7 @@ export async function generateWorkspaceIdentity(
       const currentStream = streamText({
         model: modelResult.data,
         output: Output.object({ schema: workspaceIdentitySchema }),
-        prompt: `Generate a workspace name and title for this development task:
-
-${assistantContext ? `Assistant: "${assistantContext.slice(0, 500)}"\n\nUser: "${message}"` : `"${message}"`}
-
-Requirements:
-- name: The area of the codebase being worked on (1-2 words, max 15 chars, git-safe: lowercase, hyphens only). Random bytes will be appended for uniqueness, so focus on the area not the specific task. Examples: "sidebar", "auth", "config", "api"
-- title: A 2-5 word description in verb-noun format. Examples: "Fix plan mode", "Add user authentication", "Refactor sidebar layout"`,
+        prompt: buildWorkspaceIdentityPrompt(message, conversationContext, latestUserMessage),
       });
       stream = currentStream;
 

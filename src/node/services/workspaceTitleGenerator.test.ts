@@ -2,11 +2,41 @@ import { APICallError, RetryError } from "ai";
 import { describe, expect, test } from "bun:test";
 import type { SendMessageError } from "@/common/types/errors";
 import {
+  buildWorkspaceIdentityPrompt,
   extractIdentityFromText,
   extractTextFromContentParts,
   mapModelCreationError,
   mapNameGenerationError,
 } from "./workspaceTitleGenerator";
+
+describe("buildWorkspaceIdentityPrompt", () => {
+  test("includes long-term guidance, recent-turn context, and latest-user precedence", () => {
+    const prompt = buildWorkspaceIdentityPrompt(
+      "Refactor workspace title generation",
+      "Turn 1 (User):\nOutline the plan\n\nTurn 2 (Assistant):\nImplement incrementally",
+      "Please prioritize reliability work"
+    );
+
+    expect(prompt).toContain('Primary user objective: "Refactor workspace title generation"');
+    expect(prompt).toContain("Conversation turns");
+    expect(prompt).toContain("Outline the plan");
+    expect(prompt).toContain("Please prioritize reliability work");
+    expect(prompt).toContain("most recent user message");
+    expect(prompt).toContain("long-term, overall purpose of the chat");
+  });
+
+  test("omits conversation-specific sections when no conversation block is provided", () => {
+    const prompt = buildWorkspaceIdentityPrompt(
+      "Fix flaky tests",
+      undefined,
+      "Most recent instruction that should be ignored without context"
+    );
+
+    expect(prompt).toContain('Primary user objective: "Fix flaky tests"');
+    expect(prompt).not.toContain("Conversation turns");
+    expect(prompt).not.toContain("Most recent instruction that should be ignored without context");
+  });
+});
 
 describe("extractIdentityFromText", () => {
   test("extracts from markdown bold + backtick format", () => {

@@ -1954,6 +1954,10 @@ describe("WorkspaceService regenerateTitle", () => {
       if (!result.success) {
         expect(result.error).toBe("Failed to update workspace title: disk full");
       }
+      expect(generateIdentitySpy).toHaveBeenCalledTimes(1);
+      const call = generateIdentitySpy.mock.calls[0];
+      expect(call?.[3]).toBeUndefined();
+      expect(call?.[4]).toBe("Fix CI");
       expect(updateTitleSpy).toHaveBeenCalledWith(workspaceId, "Fix CI");
     } finally {
       updateTitleSpy.mockRestore();
@@ -2003,12 +2007,18 @@ describe("WorkspaceService regenerateTitle", () => {
         expect(result.data.title).toBe("Refactor sidebar loading");
       }
       expect(iterateSpy).toHaveBeenCalledTimes(1);
-      expect(generateIdentitySpy).toHaveBeenCalledWith(
-        "Refactor sidebar loading",
-        expect.any(Array),
-        expect.anything(),
-        "Compacted summary"
-      );
+      expect(generateIdentitySpy).toHaveBeenCalledTimes(1);
+      const call = generateIdentitySpy.mock.calls[0];
+      expect(call?.[0]).toBe("Refactor sidebar loading");
+      const context = call?.[3];
+      expect(typeof context).toBe("string");
+      if (typeof context === "string") {
+        expect(context).toContain("Refactor sidebar loading");
+        expect(context).toContain("Compacted summary");
+        expect(context).toContain("No new user messages yet");
+        expect(context).not.toContain("omitted for brevity");
+      }
+      expect(call?.[4]).toBe("Refactor sidebar loading");
       expect(updateTitleSpy).toHaveBeenCalledWith(workspaceId, "Refactor sidebar loading");
     } finally {
       updateTitleSpy.mockRestore();
@@ -2016,21 +2026,17 @@ describe("WorkspaceService regenerateTitle", () => {
       iterateSpy.mockRestore();
     }
   });
-  test("uses the first assistant reply after the first user message for context", async () => {
-    const workspaceId = "ws-regenerate-title-assistant-order";
+  test("uses first user turn + latest 3 turns and flags omitted context", async () => {
+    const workspaceId = "ws-regenerate-title-first-plus-last-three";
 
-    await historyService.appendToHistory(
-      workspaceId,
-      createMuxMessage("assistant-summary", "assistant", "Older compacted summary")
-    );
-    await historyService.appendToHistory(
-      workspaceId,
-      createMuxMessage("user-first", "user", "Refine workspace title generation")
-    );
-    await historyService.appendToHistory(
-      workspaceId,
-      createMuxMessage("assistant-after-user", "assistant", "Useful assistant context")
-    );
+    for (let turn = 1; turn <= 12; turn++) {
+      const role: "user" | "assistant" = turn % 2 === 1 ? "user" : "assistant";
+      const text = `${role === "user" ? "User" : "Assistant"} turn ${turn}`;
+      await historyService.appendToHistory(
+        workspaceId,
+        createMuxMessage(`${role}-${turn}`, role, text)
+      );
+    }
 
     const generateIdentitySpy = spyOn(
       workspaceTitleGenerator,
@@ -2038,7 +2044,7 @@ describe("WorkspaceService regenerateTitle", () => {
     ).mockResolvedValue(
       Ok({
         name: "title-refresh-a1b2",
-        title: "Refine workspace title generation",
+        title: "User turn 1",
         modelUsed: "anthropic:claude-3-5-haiku-latest",
       })
     );
@@ -2050,13 +2056,13 @@ describe("WorkspaceService regenerateTitle", () => {
       const result = await workspaceService.regenerateTitle(workspaceId);
 
       expect(result.success).toBe(true);
-      expect(generateIdentitySpy).toHaveBeenCalledWith(
-        "Refine workspace title generation",
-        expect.any(Array),
-        expect.anything(),
-        "Useful assistant context"
-      );
-      expect(updateTitleSpy).toHaveBeenCalledWith(workspaceId, "Refine workspace title generation");
+      expect(generateIdentitySpy).toHaveBeenCalledTimes(1);
+      const call = generateIdentitySpy.mock.calls[0];
+      expect(call?.[0]).toBe("User turn 1");
+      const context = call?.[3];
+      expect(typeof context).toBe("string");
+      expect(call?.[4]).toBe("User turn 11");
+      expect(updateTitleSpy).toHaveBeenCalledWith(workspaceId, "User turn 1");
     } finally {
       updateTitleSpy.mockRestore();
       generateIdentitySpy.mockRestore();
