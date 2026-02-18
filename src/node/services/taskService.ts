@@ -9,7 +9,6 @@ import type { WorkspaceService } from "@/node/services/workspaceService";
 import type { HistoryService } from "@/node/services/historyService";
 import type { InitStateManager } from "@/node/services/initStateManager";
 import { log } from "@/node/services/log";
-import { detectDefaultTrunkBranch, listLocalBranches } from "@/node/git";
 import {
   discoverAgentDefinitions,
   readAgentDefinition,
@@ -17,10 +16,10 @@ import {
 } from "@/node/services/agentDefinitions/agentDefinitionsService";
 import { resolveAgentInheritanceChain } from "@/node/services/agentDefinitions/resolveAgentInheritanceChain";
 import { isAgentEffectivelyDisabled } from "@/node/services/agentDefinitions/agentEnablement";
-import { applyForkRuntimeUpdates } from "@/node/services/utils/forkRuntimeUpdates";
+import { orchestrateFork } from "@/node/services/utils/forkOrchestrator";
 import { createRuntimeForWorkspace } from "@/node/runtime/runtimeHelpers";
-import { createRuntime, runBackgroundInit } from "@/node/runtime/runtimeFactory";
-import type { InitLogger, WorkspaceCreationResult } from "@/node/runtime/Runtime";
+import { runBackgroundInit } from "@/node/runtime/runtimeFactory";
+import type { InitLogger, Runtime } from "@/node/runtime/Runtime";
 import {
   coerceNonEmptyString,
   tryReadGitHeadCommitSha,
@@ -751,70 +750,38 @@ export class TaskService {
     // Note: Local project-dir runtimes share the same directory (unsafe by design).
     // For worktree/ssh runtimes we attempt a fork first; otherwise fall back to createWorkspace.
 
-    const forkResult = await runtime.forkWorkspace({
+    const forkResult = await orchestrateFork({
+      sourceRuntime: runtime,
       projectPath: parentMeta.projectPath,
       sourceWorkspaceName: parentMeta.name,
       newWorkspaceName: workspaceName,
       initLogger,
+      config: this.config,
+      sourceWorkspaceId: parentWorkspaceId,
+      sourceRuntimeConfig: parentRuntimeConfig,
+      allowCreateFallback: true,
     });
 
-    const { forkedRuntimeConfig } = await applyForkRuntimeUpdates(
-      this.config,
-      parentWorkspaceId,
-      parentRuntimeConfig,
-      forkResult
-    );
-
-    if (forkResult.sourceRuntimeConfig) {
+    if (forkResult.success && forkResult.data.sourceRuntimeConfigUpdate) {
+      await this.config.updateWorkspaceMetadata(parentWorkspaceId, {
+        runtimeConfig: forkResult.data.sourceRuntimeConfigUpdate,
+      });
       // Ensure UI gets the updated runtimeConfig for the parent workspace.
       await this.emitWorkspaceMetadata(parentWorkspaceId);
     }
 
-    const runtimeForTaskWorkspace = createRuntime(forkedRuntimeConfig, {
-      projectPath: parentMeta.projectPath,
-      workspaceName,
-    });
-
-    let trunkBranch: string;
-    if (forkResult.success && forkResult.sourceBranch) {
-      trunkBranch = forkResult.sourceBranch;
-    } else {
-      // Fork failed - validate parentMeta.name is a valid local branch.
-      // For non-git projects (LocalRuntime), git commands fail - fall back to "main".
-      try {
-        const localBranches = await listLocalBranches(parentMeta.projectPath);
-        if (localBranches.includes(parentMeta.name)) {
-          trunkBranch = parentMeta.name;
-        } else {
-          trunkBranch = await detectDefaultTrunkBranch(parentMeta.projectPath, localBranches);
-        }
-      } catch {
-        trunkBranch = "main";
-      }
-    }
-    if (!forkResult.success && forkResult.failureIsFatal) {
+    if (!forkResult.success) {
       initLogger.logComplete(-1);
-      return Err(`Task fork failed: ${forkResult.error ?? "unknown error"}`);
+      return Err(`Task fork failed: ${forkResult.error}`);
     }
 
-    const createResult: WorkspaceCreationResult = forkResult.success
-      ? { success: true as const, workspacePath: forkResult.workspacePath }
-      : await runtime.createWorkspace({
-          projectPath: parentMeta.projectPath,
-          branchName: workspaceName,
-          trunkBranch,
-          directoryName: workspaceName,
-          initLogger,
-        });
-
-    if (!createResult.success || !createResult.workspacePath) {
-      initLogger.logComplete(-1);
-      return Err(
-        `Task.create: failed to create agent workspace (${createResult.error ?? "unknown error"})`
-      );
-    }
-
-    const workspacePath = createResult.workspacePath;
+    const {
+      workspacePath,
+      trunkBranch,
+      forkedRuntimeConfig,
+      targetRuntime: runtimeForTaskWorkspace,
+      forkedFromSource,
+    } = forkResult.data;
     const taskBaseCommitSha = await tryReadGitHeadCommitSha(runtimeForTaskWorkspace, workspacePath);
 
     taskQueueDebug("TaskService.create started (workspace created)", {
@@ -822,7 +789,7 @@ export class TaskService {
       workspaceName,
       workspacePath,
       trunkBranch,
-      forkSuccess: forkResult.success,
+      forkSuccess: forkedFromSource,
     });
 
     // Persist workspace entry before starting work so it's durable across crashes.
@@ -970,7 +937,7 @@ export class TaskService {
   }
 
   private async rollbackFailedTaskCreate(
-    runtime: ReturnType<typeof createRuntime>,
+    runtime: Runtime,
     projectPath: string,
     workspaceName: string,
     taskId: string
@@ -1793,71 +1760,58 @@ export class TaskService {
         shouldRunInit = true;
         const initLogger = getInitLogger();
 
-        const forkResult = await runtime.forkWorkspace({
+        const forkOrchestratorResult = await orchestrateFork({
+          sourceRuntime: runtime,
           projectPath: taskEntry.projectPath,
           sourceWorkspaceName: parentWorkspaceName,
           newWorkspaceName: workspaceName,
           initLogger,
+          config: this.config,
+          sourceWorkspaceId: parentId,
+          sourceRuntimeConfig: parentRuntimeConfig,
+          allowCreateFallback: true,
+          preferredTrunkBranch: trunkBranch,
         });
 
-        const { forkedRuntimeConfig: resolvedForkedRuntimeConfig } = await applyForkRuntimeUpdates(
-          this.config,
-          parentId,
-          parentRuntimeConfig,
-          forkResult
-        );
-        forkedRuntimeConfig = resolvedForkedRuntimeConfig;
-
-        if (forkResult.sourceRuntimeConfig) {
+        if (
+          forkOrchestratorResult.success &&
+          forkOrchestratorResult.data.sourceRuntimeConfigUpdate
+        ) {
+          await this.config.updateWorkspaceMetadata(parentId, {
+            runtimeConfig: forkOrchestratorResult.data.sourceRuntimeConfigUpdate,
+          });
           // Ensure UI gets the updated runtimeConfig for the parent workspace.
           await this.emitWorkspaceMetadata(parentId);
         }
 
-        if (!forkResult.success && forkResult.failureIsFatal) {
+        if (!forkOrchestratorResult.success) {
           initLogger.logComplete(-1);
-          log.error("Task fork failed", { taskId, error: forkResult.error });
+          log.error("Task fork failed", { taskId, error: forkOrchestratorResult.error });
           taskQueueDebug("TaskService.maybeStartQueuedTasks fork failed", {
             taskId,
-            error: forkResult.error,
+            error: forkOrchestratorResult.error,
           });
           continue;
         }
 
-        runtimeForTaskWorkspace = createRuntime(forkedRuntimeConfig, {
-          projectPath: taskEntry.projectPath,
-          workspaceName,
-        });
+        const {
+          forkedRuntimeConfig: resolvedForkedRuntimeConfig,
+          targetRuntime,
+          workspacePath: resolvedWorkspacePath,
+          trunkBranch: resolvedTrunkBranch,
+          forkedFromSource,
+        } = forkOrchestratorResult.data;
 
-        trunkBranch = forkResult.success ? (forkResult.sourceBranch ?? trunkBranch) : trunkBranch;
-        const createResult: WorkspaceCreationResult = forkResult.success
-          ? { success: true as const, workspacePath: forkResult.workspacePath }
-          : await runtime.createWorkspace({
-              projectPath: taskEntry.projectPath,
-              branchName: workspaceName,
-              trunkBranch,
-              directoryName: workspaceName,
-              initLogger,
-            });
-
-        if (!createResult.success || !createResult.workspacePath) {
-          initLogger.logComplete(-1);
-          const errorMessage = createResult.error ?? "unknown error";
-          log.error("Failed to create queued task workspace", { taskId, error: errorMessage });
-          taskQueueDebug("TaskService.maybeStartQueuedTasks createWorkspace failed", {
-            taskId,
-            error: errorMessage,
-            forkSuccess: forkResult.success,
-          });
-          continue;
-        }
-
-        workspacePath = createResult.workspacePath;
+        forkedRuntimeConfig = resolvedForkedRuntimeConfig;
+        runtimeForTaskWorkspace = targetRuntime;
+        workspacePath = resolvedWorkspacePath;
+        trunkBranch = resolvedTrunkBranch;
         workspaceExists = true;
 
         taskQueueDebug("TaskService.maybeStartQueuedTasks workspace created", {
           taskId,
           workspacePath,
-          forkSuccess: forkResult.success,
+          forkSuccess: forkedFromSource,
           trunkBranch,
         });
 

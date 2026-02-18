@@ -32,7 +32,7 @@ import { listLocalBranches } from "@/node/git";
 import { shellQuote } from "@/node/runtime/backgroundCommands";
 import { extractEditedFilePaths } from "@/common/utils/messages/extractEditedFiles";
 import { fileExists } from "@/node/utils/runtime/fileExists";
-import { applyForkRuntimeUpdates } from "@/node/services/utils/forkRuntimeUpdates";
+import { orchestrateFork } from "@/node/services/utils/forkOrchestrator";
 import { generateWorkspaceIdentity } from "@/node/services/workspaceTitleGenerator";
 import { NAME_GEN_PREFERRED_MODELS } from "@/common/constants/nameGeneration";
 import type { DevcontainerRuntime } from "@/node/runtime/DevcontainerRuntime";
@@ -86,7 +86,11 @@ import { createBashTool } from "@/node/services/tools/bash";
 import type { AskUserQuestionToolSuccessResult, BashToolResult } from "@/common/types/tools";
 import { secretsToRecord } from "@/common/types/secrets";
 
-import { execBuffered, movePlanFile, copyPlanFile } from "@/node/utils/runtime/helpers";
+import {
+  copyPlanFileAcrossRuntimes,
+  execBuffered,
+  movePlanFile,
+} from "@/node/utils/runtime/helpers";
 import {
   buildFileCompletionsIndex,
   EMPTY_FILE_COMPLETIONS_INDEX,
@@ -2796,12 +2800,6 @@ export class WorkspaceService extends EventEmitter {
         }
       }
 
-      // Block fork for Docker runtimes - creates broken workspaces.
-      // Sub-agent task spawning uses a different code path (TaskService.create).
-      if (isDockerRuntime(sourceRuntimeConfig)) {
-        return Err("Forking Docker workspaces is not supported. Create a new workspace instead.");
-      }
-
       // Auto-generate branch name (and title) when user omits one (seamless fork).
       // Uses pattern: {parentName}-fork-{N} for branch, "{parentTitle} (N)" for title.
       const isAutoName = newName == null;
@@ -2864,7 +2862,7 @@ export class WorkspaceService extends EventEmitter {
         return Err(resolvedNameValidation.error ?? "Invalid workspace name");
       }
 
-      const runtime = createRuntime(sourceRuntimeConfig, {
+      const sourceRuntime = createRuntime(sourceRuntimeConfig, {
         projectPath: foundProjectPath,
         workspaceName: sourceMetadata.name,
       });
@@ -2875,31 +2873,53 @@ export class WorkspaceService extends EventEmitter {
       this.initStateManager.startInit(newWorkspaceId, foundProjectPath);
       const initLogger = this.createInitLogger(newWorkspaceId);
 
-      const forkResult = await runtime.forkWorkspace({
-        projectPath: foundProjectPath,
-        sourceWorkspaceName: sourceMetadata.name,
-        newWorkspaceName: resolvedName,
-        initLogger,
-      });
+      const initAbortController = new AbortController();
+      this.initAbortControllers.set(newWorkspaceId, initAbortController);
+
+      let forkResult: Awaited<ReturnType<typeof orchestrateFork>>;
+      try {
+        forkResult = await orchestrateFork({
+          sourceRuntime,
+          projectPath: foundProjectPath,
+          sourceWorkspaceName: sourceMetadata.name,
+          newWorkspaceName: resolvedName,
+          initLogger,
+          config: this.config,
+          sourceWorkspaceId,
+          sourceRuntimeConfig,
+          allowCreateFallback: false,
+          abortSignal: initAbortController.signal,
+        });
+      } catch (error) {
+        // Guarantee init lifecycle cleanup when orchestrateFork rejects.
+        // initLogger.logComplete deletes from initAbortControllers and ends init state.
+        initLogger.logComplete(-1);
+        throw error;
+      }
 
       if (!forkResult.success) {
         initLogger.logComplete(-1);
-        return Err(forkResult.error ?? "Failed to fork workspace");
+        return Err(forkResult.error);
       }
 
-      // Run init for forked workspace (fire-and-forget like create())
-      // Use sourceBranch as trunk since fork is based on source workspace's branch
-      const secrets = secretsToRecord(this.config.getEffectiveSecrets(foundProjectPath));
+      const {
+        workspacePath,
+        trunkBranch,
+        forkedRuntimeConfig,
+        targetRuntime,
+        sourceRuntimeConfigUpdate,
+        sourceRuntimeConfigUpdated,
+      } = forkResult.data;
 
-      const initAbortController = new AbortController();
-      this.initAbortControllers.set(newWorkspaceId, initAbortController);
+      // Run init for forked workspace (fire-and-forget like create())
+      const secrets = secretsToRecord(this.config.getEffectiveSecrets(foundProjectPath));
       runBackgroundInit(
-        runtime,
+        targetRuntime,
         {
           projectPath: foundProjectPath,
           branchName: resolvedName,
-          trunkBranch: forkResult.sourceBranch ?? "main",
-          workspacePath: forkResult.workspacePath!,
+          trunkBranch,
+          workspacePath,
           initLogger,
           env: secrets,
           abortSignal: initAbortController.signal,
@@ -2927,7 +2947,7 @@ export class WorkspaceService extends EventEmitter {
           );
         }
       } catch (copyError) {
-        await runtime.deleteWorkspace(foundProjectPath, resolvedName, true);
+        await targetRuntime.deleteWorkspace(foundProjectPath, resolvedName, true);
         try {
           await fsPromises.rm(newSessionDir, { recursive: true, force: true });
         } catch (cleanupError) {
@@ -2938,24 +2958,29 @@ export class WorkspaceService extends EventEmitter {
         return Err(`Failed to copy chat history: ${message}`);
       }
 
-      // Copy plan file if it exists (checks both new and legacy paths)
-      await copyPlanFile(
-        runtime,
+      // Copy plan file using explicit source/target runtimes for cross-runtime safety.
+      // Create a fresh source runtime handle because DockerRuntime.forkWorkspace() can
+      // mutate the original runtime's container identity to target the new workspace.
+      const freshSourceRuntime = createRuntime(sourceRuntimeConfig, {
+        projectPath: foundProjectPath,
+        workspaceName: sourceMetadata.name,
+      });
+      await copyPlanFileAcrossRuntimes(
+        freshSourceRuntime,
+        targetRuntime,
         sourceMetadata.name,
         sourceWorkspaceId,
         resolvedName,
         projectName
       );
 
-      // Apply runtime-provided config updates (e.g., Coder marks shared workspaces)
-      const { forkedRuntimeConfig } = await applyForkRuntimeUpdates(
-        this.config,
-        sourceWorkspaceId,
-        sourceRuntimeConfig,
-        forkResult
-      );
+      if (sourceRuntimeConfigUpdate) {
+        await this.config.updateWorkspaceMetadata(sourceWorkspaceId, {
+          runtimeConfig: sourceRuntimeConfigUpdate,
+        });
+      }
 
-      if (forkResult.sourceRuntimeConfig) {
+      if (sourceRuntimeConfigUpdated) {
         const allMetadataUpdated = await this.config.getAllWorkspaceMetadata();
         const updatedMetadata = allMetadataUpdated.find((m) => m.id === sourceWorkspaceId) ?? null;
         const enrichedMetadata = this.enrichMaybeFrontendMetadata(updatedMetadata);
@@ -2968,7 +2993,7 @@ export class WorkspaceService extends EventEmitter {
       }
 
       // Compute namedWorkspacePath for frontend metadata
-      const namedWorkspacePath = runtime.getWorkspacePath(foundProjectPath, resolvedName);
+      const namedWorkspacePath = targetRuntime.getWorkspacePath(foundProjectPath, resolvedName);
 
       const metadata: FrontendWorkspaceMetadata = {
         id: newWorkspaceId,
