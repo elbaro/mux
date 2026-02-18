@@ -186,6 +186,19 @@ export function isTerminalFocused(target: EventTarget | null): boolean {
 }
 
 /**
+ * Check if a modal dialog is currently open.
+ * Used by capture-phase keyboard handlers to skip shortcuts while a modal is active,
+ * since bubble-phase stopPropagation from dialog onKeyDown can't block capture-phase listeners.
+ *
+ * Only matches true modal dialogs (aria-modal="true"), not non-modal Radix popovers
+ * which also use role="dialog" but should not suppress global shortcuts.
+ */
+export function isDialogOpen(): boolean {
+  if (typeof document === "undefined") return false;
+  return document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+}
+
+/**
  * Format a keybind for display to users.
  * Returns Mac-style symbols on macOS, or Windows-style text elsewhere.
  */
@@ -403,6 +416,12 @@ export const KEYBINDS = {
   // macOS: Cmd+Shift+N, Win/Linux: Ctrl+Shift+N
   // "N" for Notifications
   TOGGLE_NOTIFICATIONS: { key: "N", ctrl: true, shift: true },
+
+  /** Confirm action in confirmation dialogs */
+  CONFIRM_DIALOG_YES: { key: "y", allowShift: true },
+
+  /** Cancel/dismiss confirmation dialogs */
+  CONFIRM_DIALOG_NO: { key: "n", allowShift: true },
 
   TOGGLE_POWER_MODE: { key: "F12", shift: true },
 } as const;
