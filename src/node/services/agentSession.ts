@@ -1396,7 +1396,9 @@ export class AgentSession {
     const lower = modelName?.toLowerCase() ?? "";
     return (
       provider === "anthropic" &&
-      (lower.startsWith("claude-sonnet-4-5") || lower.startsWith("claude-opus-4-6"))
+      (lower.startsWith("claude-sonnet-4-5") ||
+        lower.startsWith("claude-sonnet-4-6") ||
+        lower.startsWith("claude-opus-4-6"))
     );
   }
 
