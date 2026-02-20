@@ -88,7 +88,9 @@ export const PROVIDER_DEFINITIONS = {
   },
   "claude-agent-sdk": {
     displayName: "Claude Agent SDK",
-    import: () => import("@anthropic-ai/claude-agent-sdk"),
+    // No-op: SDK is Node-only (spawns subprocesses) and would break Vite's
+    // renderer bundle. Loaded lazily in agentSdkService.ts instead.
+    import: () => Promise.resolve({}),
     factoryName: "query", // Different pattern - not a model factory, delegates to SDK's agent loop
     requiresApiKey: true, // Uses ANTHROPIC_API_KEY
     strokeBasedIcon: true,
