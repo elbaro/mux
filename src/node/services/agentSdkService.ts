@@ -397,7 +397,7 @@ export class AgentSdkService extends EventEmitter {
           totalInputTokens += sdkMessage.message.usage.input_tokens;
           totalOutputTokens += sdkMessage.message.usage.output_tokens;
         } else if (isSdkUserMessage(sdkMessage)) {
-          this.handleUserMessage(sdkMessage, workspaceId, messageId, pendingToolCalls);
+          this.handleUserMessage(sdkMessage, workspaceId, messageId, pendingToolCalls, parts);
         } else if (isSdkToolProgressMessage(sdkMessage)) {
           log.debug("[AgentSdkService] Tool progress", {
             workspaceId,
@@ -566,7 +566,8 @@ export class AgentSdkService extends EventEmitter {
     userMsg: SdkUserMessage,
     workspaceId: string,
     messageId: string,
-    pendingToolCalls: Map<string, string>
+    pendingToolCalls: Map<string, string>,
+    parts: CompletedMessagePart[]
   ): void {
     const toolUseId = userMsg.parent_tool_use_id;
     if (toolUseId == null) {
@@ -575,6 +576,23 @@ export class AgentSdkService extends EventEmitter {
 
     const toolName = pendingToolCalls.get(toolUseId) ?? "unknown";
     pendingToolCalls.delete(toolUseId);
+
+    // Update the matching tool part with the result so it persists correctly.
+    // Without this, parts stay as "input-available" and the model retries
+    // the tool call because it doesn't see a result in reconstructed history.
+    const partIndex = parts.findIndex(
+      (p) => p.type === "dynamic-tool" && p.toolCallId === toolUseId
+    );
+    if (partIndex !== -1) {
+      const existing = parts[partIndex];
+      if (existing.type === "dynamic-tool") {
+        parts[partIndex] = {
+          ...existing,
+          state: "output-available" as const,
+          output: userMsg.tool_use_result,
+        };
+      }
+    }
 
     const toolEndEvent: ToolCallEndEvent = {
       type: "tool-call-end",
