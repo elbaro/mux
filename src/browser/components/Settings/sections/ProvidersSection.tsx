@@ -149,6 +149,8 @@ const PROVIDER_KEY_URLS: Partial<Record<ProviderName, string>> = {
   xai: "https://console.x.ai/team/default/api-keys",
   deepseek: "https://platform.deepseek.com/api_keys",
   openrouter: "https://openrouter.ai/settings/keys",
+  // claude-agent-sdk: Uses Anthropic API key
+  "claude-agent-sdk": "https://console.anthropic.com/settings/keys",
   // bedrock: AWS credential chain, no simple key URL
   // ollama: local service, no key needed
 };

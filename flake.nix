@@ -2,7 +2,7 @@
   description = "mux - coder multiplexer";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -76,7 +76,7 @@
 
             outputHashMode = "recursive";
             # Marker used by scripts/update_flake_hash.sh to update this hash in place.
-            outputHash = "sha256-+6o2twg8KOUBuq2RoEqY/OwqCnWSrUiXFuaeLUiuF3k="; # mux-offline-cache-hash
+            outputHash = "sha256-J7RnjeFgXE7jDBK8iLocWcmq/iOvV9SMel+9c0rdUQU="; # mux-offline-cache-hash
           };
 
           configurePhase = ''

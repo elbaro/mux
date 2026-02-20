@@ -57,6 +57,8 @@ import type { ToolPolicy } from "@/common/utils/tools/toolPolicy";
 import type { PTCEventWithParent } from "@/node/services/tools/code_execution";
 import { MockAiStreamPlayer } from "./mock/mockAiStreamPlayer";
 import { ProviderModelFactory, modelCostsIncluded } from "./providerModelFactory";
+import { AgentSdkService } from "./agentSdkService";
+import { resolveProviderCredentials } from "@/node/utils/providerRequirements";
 import { wrapToolsWithSystem1 } from "./system1ToolWrapper";
 import { prepareMessagesForProvider } from "./messagePipeline";
 import { resolveAgentForStream } from "./agentResolution";
@@ -121,6 +123,7 @@ export class AIService extends EventEmitter {
   private readonly backgroundProcessManager?: BackgroundProcessManager;
   private readonly sessionUsageService?: SessionUsageService;
   private readonly providerModelFactory: ProviderModelFactory;
+  private readonly agentSdkService: AgentSdkService;
 
   // Tracks in-flight stream startup (before StreamManager emits stream-start).
   // This enables user interrupts (Esc/Ctrl+C) during the UI "starting..." phase.
@@ -160,8 +163,10 @@ export class AIService extends EventEmitter {
     this.telemetryService = telemetryService;
     this.streamManager = new StreamManager(historyService, sessionUsageService);
     this.providerModelFactory = new ProviderModelFactory(config, providerService, policyService);
+    this.agentSdkService = new AgentSdkService();
     void this.ensureSessionsDir();
     this.setupStreamEventForwarding();
+    this.setupAgentSdkEventForwarding();
     this.mockModeEnabled = false;
 
     if (process.env.MUX_MOCK_AI === "1") {
@@ -259,6 +264,25 @@ export class AIService extends EventEmitter {
         this.emit("stream-abort", data);
       })();
     });
+  }
+
+  /**
+   * Forward stream events from AgentSdkService to AIService consumers.
+   * The SDK service uses a different execution model but emits compatible events.
+   */
+  private setupAgentSdkEventForwarding(): void {
+    for (const event of [
+      "stream-start",
+      "stream-delta",
+      "stream-end",
+      "stream-abort",
+      "tool-call-start",
+      "tool-call-end",
+      "reasoning-delta",
+      "usage-delta",
+    ] as const) {
+      this.agentSdkService.on(event, (data: unknown) => this.emit(event, data));
+    }
   }
 
   private async ensureSessionsDir(): Promise<void> {
@@ -366,6 +390,45 @@ export class AIService extends EventEmitter {
         return await this.mockAiStreamPlayer.play(messages, workspaceId, {
           model: modelString,
           abortSignal: combinedAbortSignal,
+        });
+      }
+
+      // Claude Agent SDK: Delegate to the SDK's agent loop instead of using streamText.
+      // The SDK handles tools, streaming, and agent orchestration internally.
+      if (this.agentSdkService.isAgentSdkModel(modelString)) {
+        await this.initStateManager.waitForInit(workspaceId, combinedAbortSignal);
+        if (combinedAbortSignal.aborted) {
+          return Ok(undefined);
+        }
+
+        // Get workspace metadata for cwd
+        const metadataResult = await this.getWorkspaceMetadata(workspaceId);
+        if (!metadataResult.success) {
+          return Err({ type: "unknown", raw: metadataResult.error });
+        }
+        const metadata = metadataResult.data;
+
+        // Extract user prompt from the last user message
+        const lastUserMessage = messages.filter((m) => m.role === "user").pop();
+        const prompt =
+          lastUserMessage?.parts
+            .filter((p) => p.type === "text")
+            .map((p) => (p as { text: string }).text)
+            .join("\n") ?? "";
+
+        // Resolve API key from config or environment
+        const providersConfig = this.config.loadProvidersConfig() ?? {};
+        const providerConfig = providersConfig["claude-agent-sdk"] ?? {};
+        const credentials = resolveProviderCredentials("claude-agent-sdk", providerConfig);
+
+        return await this.agentSdkService.streamWithSdk({
+          prompt,
+          workspaceId,
+          cwd: metadata.projectPath,
+          modelString,
+          providerConfig,
+          abortSignal: combinedAbortSignal,
+          apiKey: credentials.apiKey,
         });
       }
 
@@ -1026,6 +1089,12 @@ export class AIService extends EventEmitter {
       this.mockAiStreamPlayer.stop(workspaceId);
       return Ok(undefined);
     }
+
+    // Check if this is an SDK stream
+    if (this.agentSdkService.isStreaming(workspaceId)) {
+      return this.agentSdkService.stopStream(workspaceId);
+    }
+
     return this.streamManager.stopStream(workspaceId, options);
   }
 
@@ -1036,7 +1105,10 @@ export class AIService extends EventEmitter {
     if (this.mockModeEnabled && this.mockAiStreamPlayer) {
       return this.mockAiStreamPlayer.isStreaming(workspaceId);
     }
-    return this.streamManager.isStreaming(workspaceId);
+    // Check both standard StreamManager and AgentSdkService
+    return (
+      this.streamManager.isStreaming(workspaceId) || this.agentSdkService.isStreaming(workspaceId)
+    );
   }
 
   /**

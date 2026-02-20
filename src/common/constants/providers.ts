@@ -86,6 +86,13 @@ export const PROVIDER_DEFINITIONS = {
     factoryName: "createOllama",
     requiresApiKey: false, // Local service
   },
+  "claude-agent-sdk": {
+    displayName: "Claude Agent SDK",
+    import: () => import("@anthropic-ai/claude-agent-sdk"),
+    factoryName: "query", // Different pattern - not a model factory, delegates to SDK's agent loop
+    requiresApiKey: true, // Uses ANTHROPIC_API_KEY
+    strokeBasedIcon: true,
+  },
 } as const satisfies Record<string, ProviderDefinition>;
 
 /**

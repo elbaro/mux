@@ -56,6 +56,10 @@ export const PROVIDER_ENV_VARS: Partial<
   bedrock: {
     region: ["AWS_REGION", "AWS_DEFAULT_REGION"],
   },
+  // Claude Agent SDK uses the same API key as Anthropic - it spawns Claude Code internally
+  "claude-agent-sdk": {
+    apiKey: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+  },
 };
 
 /** Azure OpenAI env vars (special case: maps to "openai" provider) */
