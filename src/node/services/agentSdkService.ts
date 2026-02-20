@@ -87,7 +87,15 @@ interface SdkResultMessage {
 interface SdkToolProgressMessage {
   type: "tool_progress";
   tool_name: string;
+  tool_use_id: string;
   elapsed_time_seconds: number;
+}
+
+/** SDK user messages carry tool results after the SDK executes a tool internally. */
+interface SdkUserMessage {
+  type: "user";
+  tool_use_result?: unknown;
+  parent_tool_use_id: string | null;
 }
 
 type SdkMessage =
@@ -96,6 +104,7 @@ type SdkMessage =
   | SdkAssistantMessage
   | SdkResultMessage
   | SdkToolProgressMessage
+  | SdkUserMessage
   | { type: string };
 
 interface SdkOptions {
@@ -265,6 +274,10 @@ function isSdkResultMessage(msg: SdkMessage): msg is SdkResultMessage {
   return msg.type === "result";
 }
 
+function isSdkUserMessage(msg: SdkMessage): msg is SdkUserMessage {
+  return msg.type === "user";
+}
+
 // ---------------------------------------------------------------------------
 // Agent SDK Service
 // ---------------------------------------------------------------------------
@@ -354,6 +367,8 @@ export class AgentSdkService extends EventEmitter {
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
       const parts: CompletedMessagePart[] = [];
+      // Track pending tool calls so user messages can emit tool-call-end with the right name
+      const pendingToolCalls = new Map<string, string>(); // toolCallId → toolName
 
       // Process SDK messages
       for await (const sdkMessage of queryIterator) {
@@ -372,9 +387,17 @@ export class AgentSdkService extends EventEmitter {
         } else if (isSdkPartialMessage(sdkMessage)) {
           this.handleStreamEvent(sdkMessage, workspaceId, messageId);
         } else if (isSdkAssistantMessage(sdkMessage)) {
-          this.handleAssistantMessage(sdkMessage, workspaceId, messageId, parts);
+          this.handleAssistantMessage(
+            sdkMessage,
+            workspaceId,
+            messageId,
+            parts,
+            pendingToolCalls
+          );
           totalInputTokens += sdkMessage.message.usage.input_tokens;
           totalOutputTokens += sdkMessage.message.usage.output_tokens;
+        } else if (isSdkUserMessage(sdkMessage)) {
+          this.handleUserMessage(sdkMessage, workspaceId, messageId, pendingToolCalls);
         } else if (isSdkToolProgressMessage(sdkMessage)) {
           log.debug("[AgentSdkService] Tool progress", {
             workspaceId,
@@ -456,7 +479,11 @@ export class AgentSdkService extends EventEmitter {
   }
 
   /**
-   * Handle a partial streaming message (content_block_delta / content_block_start).
+   * Handle partial streaming messages (text/reasoning deltas).
+   *
+   * Tool call events are NOT emitted here because content_block_start only has
+   * empty input ({}). tool-call-start is emitted from handleAssistantMessage
+   * where the complete input is available.
    */
   private handleStreamEvent(
     partialMsg: SdkPartialAssistantMessage,
@@ -465,40 +492,62 @@ export class AgentSdkService extends EventEmitter {
   ): void {
     const event = partialMsg.event;
 
-    if (event.type === "content_block_delta" && event.delta) {
-      const delta = event.delta;
-      if (delta.type === "text_delta" && delta.text) {
-        const deltaEvent: StreamDeltaEvent = {
-          type: "stream-delta",
-          workspaceId,
-          messageId,
-          delta: delta.text,
-          tokens: 0, // Token count not available in deltas
-          timestamp: Date.now(),
-        };
-        this.emit("stream-delta", deltaEvent);
-      } else if (delta.type === "thinking_delta" && delta.thinking) {
-        const reasoningEvent: ReasoningDeltaEvent = {
-          type: "reasoning-delta",
-          workspaceId,
-          messageId,
-          delta: delta.thinking,
-          tokens: 0,
-          timestamp: Date.now(),
-        };
-        this.emit("reasoning-delta", reasoningEvent);
-      }
-    } else if (event.type === "content_block_start" && event.content_block) {
-      const contentBlock = event.content_block;
-      if (contentBlock.type === "tool_use") {
-        const toolBlock = contentBlock as ToolUseBlock;
+    if (event.type !== "content_block_delta" || !event.delta) {
+      return;
+    }
+
+    const delta = event.delta;
+    if (delta.type === "text_delta" && delta.text) {
+      const deltaEvent: StreamDeltaEvent = {
+        type: "stream-delta",
+        workspaceId,
+        messageId,
+        delta: delta.text,
+        tokens: 0, // Token count not available in deltas
+        timestamp: Date.now(),
+      };
+      this.emit("stream-delta", deltaEvent);
+    } else if (delta.type === "thinking_delta" && delta.thinking) {
+      const reasoningEvent: ReasoningDeltaEvent = {
+        type: "reasoning-delta",
+        workspaceId,
+        messageId,
+        delta: delta.thinking,
+        tokens: 0,
+        timestamp: Date.now(),
+      };
+      this.emit("reasoning-delta", reasoningEvent);
+    }
+  }
+
+  /**
+   * Handle a complete assistant message.
+   *
+   * Emits tool-call-start for each tool_use block (now with complete input),
+   * and tracks them so handleUserMessage can emit tool-call-end with results.
+   */
+  private handleAssistantMessage(
+    assistantMsg: SdkAssistantMessage,
+    workspaceId: string,
+    messageId: string,
+    parts: CompletedMessagePart[],
+    pendingToolCalls: Map<string, string>
+  ): void {
+    const msgParts = convertContentBlocksToParts(assistantMsg.message.content);
+    parts.push(...msgParts);
+
+    // Emit tool-call-start for each tool use (complete input is available here)
+    for (const part of msgParts) {
+      if (part.type === "dynamic-tool") {
+        pendingToolCalls.set(part.toolCallId, part.toolName);
+
         const toolStartEvent: ToolCallStartEvent = {
           type: "tool-call-start",
           workspaceId,
           messageId,
-          toolCallId: toolBlock.id,
-          toolName: toolBlock.name,
-          args: toolBlock.input,
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          args: part.input,
           tokens: 0,
           timestamp: Date.now(),
         };
@@ -508,32 +557,35 @@ export class AgentSdkService extends EventEmitter {
   }
 
   /**
-   * Handle a complete assistant message - extract parts and emit tool-call-end events.
+   * Handle a user message from the SDK — these carry tool execution results.
+   *
+   * The SDK executes tools internally and wraps the results in user messages.
+   * Each user message with a parent_tool_use_id corresponds to a prior tool call.
    */
-  private handleAssistantMessage(
-    assistantMsg: SdkAssistantMessage,
+  private handleUserMessage(
+    userMsg: SdkUserMessage,
     workspaceId: string,
     messageId: string,
-    parts: CompletedMessagePart[]
+    pendingToolCalls: Map<string, string>
   ): void {
-    const msgParts = convertContentBlocksToParts(assistantMsg.message.content);
-    parts.push(...msgParts);
-
-    // Emit tool-call-end for any tool uses
-    for (const part of msgParts) {
-      if (part.type === "dynamic-tool") {
-        const toolEndEvent: ToolCallEndEvent = {
-          type: "tool-call-end",
-          workspaceId,
-          messageId,
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          result: undefined, // SDK handles tool results internally
-          timestamp: Date.now(),
-        };
-        this.emit("tool-call-end", toolEndEvent);
-      }
+    const toolUseId = userMsg.parent_tool_use_id;
+    if (toolUseId == null) {
+      return;
     }
+
+    const toolName = pendingToolCalls.get(toolUseId) ?? "unknown";
+    pendingToolCalls.delete(toolUseId);
+
+    const toolEndEvent: ToolCallEndEvent = {
+      type: "tool-call-end",
+      workspaceId,
+      messageId,
+      toolCallId: toolUseId,
+      toolName,
+      result: userMsg.tool_use_result,
+      timestamp: Date.now(),
+    };
+    this.emit("tool-call-end", toolEndEvent);
   }
 
   /**
