@@ -398,6 +398,7 @@ export class AgentSession {
     mode?: OnChatMode
   ): Promise<void> {
     let replayMode: "full" | "since" | "live" = "full";
+    let hasOlderHistory: boolean | undefined;
     let serverCursor: OnChatCursor | undefined;
     let emittedReplayMessages = false;
 
@@ -467,13 +468,11 @@ export class AgentSession {
       const partial = await this.historyService.readPartial(this.workspaceId);
       const partialHistorySequence = partial?.metadata?.historySequence;
 
-      // Load chat history from the penultimate compaction boundary onward
-      // (skip=1) so the user sees the previous epoch plus the current epoch.
-      // This provides context for what was summarized in the latest compaction.
-      // TODO: support paginated history loading so users can view older epochs on demand.
+      // Load chat history from the latest compaction boundary onward (skip=0).
+      // Older compaction epochs are fetched on demand through workspace.history.loadMore.
       const historyResult = await this.historyService.getHistoryFromLatestBoundary(
         this.workspaceId,
-        1
+        0
       );
 
       let sinceHistorySequence: number | undefined;
@@ -556,6 +555,18 @@ export class AgentSession {
         } else {
           sinceHistorySequence = undefined;
           afterTimestamp = undefined;
+        }
+
+        if (replayMode === "full") {
+          if (oldestHistorySequence === undefined) {
+            // Empty full replay means there is no older page to request.
+            hasOlderHistory = false;
+          } else {
+            hasOlderHistory = await this.historyService.hasHistoryBeforeSequence(
+              this.workspaceId,
+              oldestHistorySequence
+            );
+          }
         }
 
         for (const message of history) {
@@ -676,6 +687,7 @@ export class AgentSession {
         message: {
           type: "caught-up",
           replay: replayMode,
+          ...(hasOlderHistory !== undefined ? { hasOlderHistory } : {}),
           cursor: serverCursor,
         },
       });
