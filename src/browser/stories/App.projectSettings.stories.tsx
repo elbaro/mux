@@ -41,23 +41,6 @@ const MOCK_TOOLS = [
   "status_set",
 ];
 
-const POSTHOG_TOOLS = [
-  "add-insight-to-dashboard",
-  "dashboard-create",
-  "dashboard-delete",
-  "dashboard-get",
-  "dashboards-get-all",
-  "dashboard-update",
-  "docs-search",
-  "error-details",
-  "list-errors",
-  "create-feature-flag",
-  "delete-feature-flag",
-  "feature-flag-get-all",
-  "experiment-get-all",
-  "experiment-create",
-];
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -412,7 +395,6 @@ export const ProjectSettingsWithServers: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: false },
             filesystem: {
               transport: "stdio",
               command: "npx -y @anthropics/filesystem-server /tmp",
@@ -421,7 +403,6 @@ export const ProjectSettingsWithServers: AppStory = {
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
             filesystem: ["read_file", "write_file", "list_directory"],
           },
           preCacheTools: true,
@@ -435,7 +416,6 @@ export const ProjectSettingsWithServers: AppStory = {
     // Verify servers are shown
     const body = within(canvasElement.ownerDocument.body);
     await body.findByText("mux");
-    await body.findByText("posthog");
     await body.findByText("filesystem");
   },
 };
@@ -448,7 +428,6 @@ export const ProjectSettingsMixedState: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: true },
             filesystem: {
               transport: "stdio",
               command: "npx -y @anthropics/filesystem-server /tmp",
@@ -457,7 +436,6 @@ export const ProjectSettingsMixedState: AppStory = {
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
             filesystem: ["read_file", "write_file", "list_directory"],
           },
           preCacheTools: true,
@@ -467,12 +445,6 @@ export const ProjectSettingsMixedState: AppStory = {
   ),
   play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     await openProjectSettings(canvasElement);
-
-    const body = within(canvasElement.ownerDocument.body);
-
-    // posthog should show as disabled
-    await body.findByText("posthog");
-    // The switch should be off for posthog
   },
 };
 
@@ -607,11 +579,9 @@ export const WorkspaceMCPNoOverrides: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: false },
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
           },
           preCacheTools: true,
         })
@@ -624,7 +594,6 @@ export const WorkspaceMCPNoOverrides: AppStory = {
 
     // Both servers should be shown and enabled.
     await expect((await modal.find()).findByText("mux")).resolves.toBeInTheDocument();
-    await expect((await modal.find()).findByText("posthog")).resolves.toBeInTheDocument();
   },
 };
 
@@ -636,11 +605,9 @@ export const WorkspaceMCPProjectDisabledServer: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: true },
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
           },
           preCacheTools: true,
         })
@@ -651,8 +618,6 @@ export const WorkspaceMCPProjectDisabledServer: AppStory = {
     await openWorkspaceMCPModal(canvasElement);
     const modal = createWorkspaceMCPModalScope(canvasElement);
 
-    // posthog should show "(disabled at project level)" but switch should still be toggleable.
-    await expect((await modal.find()).findByText("posthog")).resolves.toBeInTheDocument();
     await expect(
       (await modal.find()).findByText(/disabled at project level/i)
     ).resolves.toBeInTheDocument();
@@ -667,14 +632,11 @@ export const WorkspaceMCPEnabledOverride: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: true },
           },
           workspaceOverrides: {
-            enabledServers: ["posthog"],
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
           },
           preCacheTools: true,
         })
@@ -685,8 +647,6 @@ export const WorkspaceMCPEnabledOverride: AppStory = {
     await openWorkspaceMCPModal(canvasElement);
     const modal = createWorkspaceMCPModalScope(canvasElement);
 
-    // posthog should be enabled despite project-level disable.
-    await expect((await modal.find()).findByText("posthog")).resolves.toBeInTheDocument();
     await expect(
       (await modal.find()).findByText(/disabled at project level/i)
     ).resolves.toBeInTheDocument();
@@ -703,14 +663,11 @@ export const WorkspaceMCPDisabledOverride: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: false },
           },
           workspaceOverrides: {
-            disabledServers: ["posthog"],
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
           },
           preCacheTools: true,
         })
@@ -721,9 +678,7 @@ export const WorkspaceMCPDisabledOverride: AppStory = {
     await openWorkspaceMCPModal(canvasElement);
     const modal = createWorkspaceMCPModalScope(canvasElement);
 
-    // mux should be enabled, posthog should be disabled.
     await expect((await modal.find()).findByText("mux")).resolves.toBeInTheDocument();
-    await expect((await modal.find()).findByText("posthog")).resolves.toBeInTheDocument();
   },
 };
 
@@ -734,15 +689,12 @@ export const WorkspaceMCPWithToolAllowlist: AppStory = {
       setup={() =>
         setupMCPStory({
           servers: {
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: false },
           },
           workspaceOverrides: {
             toolAllowlist: {
-              posthog: ["docs-search", "error-details", "list-errors"],
             },
           },
           testResults: {
-            posthog: POSTHOG_TOOLS,
           },
           preCacheTools: true,
         })
@@ -753,7 +705,6 @@ export const WorkspaceMCPWithToolAllowlist: AppStory = {
     await openWorkspaceMCPModal(canvasElement);
     const modal = createWorkspaceMCPModalScope(canvasElement);
 
-    await expect((await modal.find()).findByText("posthog")).resolves.toBeInTheDocument();
 
     // Should show filtered tool count.
     await expect(
@@ -836,11 +787,9 @@ export const ToggleServerEnabled: AppStory = {
         setupMCPStory({
           servers: {
             mux: { transport: "stdio", command: "npx -y @anthropics/mux-server", disabled: false },
-            posthog: { transport: "stdio", command: "npx -y posthog-mcp-server", disabled: false },
           },
           testResults: {
             mux: MOCK_TOOLS,
-            posthog: POSTHOG_TOOLS,
           },
           preCacheTools: true,
         })
@@ -851,12 +800,8 @@ export const ToggleServerEnabled: AppStory = {
     await openWorkspaceMCPModal(canvasElement);
     const modal = createWorkspaceMCPModalScope(canvasElement);
 
-    // Find the posthog server row.
-    await expect((await modal.find()).findByText("posthog")).resolves.toBeInTheDocument();
 
-    // Find all switches and click the second one (posthog).
     const switches = await (await modal.find()).findAllByRole("switch");
-    // posthog should be the second switch
     if (switches.length >= 2) {
       await userEvent.click(switches[1]);
     }

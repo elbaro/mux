@@ -12,7 +12,7 @@ type SendMessageOptions = NonNullable<
   InferClientInputs<ORPCClient>["workspace"]["sendMessage"]["options"]
 >;
 
-export const MOBILE_HIDDEN_COMMANDS = new Set(["telemetry", "vim"]);
+export const MOBILE_HIDDEN_COMMANDS = new Set(["vim"]);
 
 export function extractRootCommand(replacement: string): string | null {
   if (typeof replacement !== "string") {

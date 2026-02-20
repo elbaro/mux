@@ -33,7 +33,6 @@ MUX_PROJECT_CANDIDATES="${MUX_PROJECT_CANDIDATES:-/workspace:/app:/workspaces:/r
 MUX_MODEL="${MUX_MODEL:-anthropic:claude-sonnet-4-5}"
 MUX_TIMEOUT_MS="${MUX_TIMEOUT_MS:-}"
 MUX_WORKSPACE_ID="${MUX_WORKSPACE_ID:-mux-bench}"
-MUX_EXPERIMENTS="${MUX_EXPERIMENTS:-}"
 
 resolve_project_path() {
   if [[ -n "${MUX_PROJECT_PATH}" ]]; then
@@ -66,19 +65,6 @@ cmd=(bun src/cli/run.ts
   --model "${MUX_MODEL}"
   --keep-background-processes
   --json)
-
-# Add experiment flags (comma-separated → repeated --experiment flags)
-if [[ -n "${MUX_EXPERIMENTS}" ]]; then
-  IFS=',' read -r -a experiments <<<"${MUX_EXPERIMENTS}"
-  for exp in "${experiments[@]}"; do
-    # Trim whitespace
-    exp="${exp#"${exp%%[![:space:]]*}"}"
-    exp="${exp%"${exp##*[![:space:]]}"}"
-    if [[ -n "${exp}" ]]; then
-      cmd+=(--experiment "${exp}")
-    fi
-  done
-fi
 
 # Append arbitrary mux run flags (e.g., --thinking high --mode exec --use-1m --budget 5.00)
 if [[ -n "${MUX_RUN_ARGS:-}" ]]; then

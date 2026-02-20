@@ -23,8 +23,6 @@ import type { SendMessageOptions } from "@/common/orpc/types";
 import type { ThinkingLevel } from "@/common/types/thinking";
 import type { MuxProviderOptions } from "@/common/types/providerOptions";
 import { WORKSPACE_DEFAULTS } from "@/constants/workspaceDefaults";
-import { isExperimentEnabled } from "@/browser/hooks/useExperiments";
-import { EXPERIMENT_IDS } from "@/common/constants/experiments";
 
 /**
  * Read provider options from localStorage
@@ -92,13 +90,5 @@ export function getSendOptionsFromStorage(workspaceId: string): SendMessageOptio
     thinkingLevel,
     providerOptions,
     disableWorkspaceAgents,
-    experiments: {
-      programmaticToolCalling: isExperimentEnabled(EXPERIMENT_IDS.PROGRAMMATIC_TOOL_CALLING),
-      programmaticToolCallingExclusive: isExperimentEnabled(
-        EXPERIMENT_IDS.PROGRAMMATIC_TOOL_CALLING_EXCLUSIVE
-      ),
-      system1: isExperimentEnabled(EXPERIMENT_IDS.SYSTEM_1),
-      execSubagentHardRestart: isExperimentEnabled(EXPERIMENT_IDS.EXEC_SUBAGENT_HARD_RESTART),
-    },
   });
 }

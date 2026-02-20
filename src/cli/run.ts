@@ -73,7 +73,6 @@ import { DockerRuntime } from "../node/runtime/DockerRuntime";
 import { runFullInit } from "../node/runtime/runtimeFactory";
 import { execSync } from "child_process";
 import { getParseOptions } from "./argv";
-import { EXPERIMENT_IDS } from "../common/constants/experiments";
 import { getErrorMessage } from "@/common/utils/errors";
 
 // Display labels for CLI help (OFF, LOW, MED, HIGH, MAX)
@@ -180,35 +179,6 @@ function renderUnknown(value: unknown): string {
   }
 }
 
-const VALID_EXPERIMENT_IDS = new Set<string>(Object.values(EXPERIMENT_IDS));
-
-function collectExperiments(value: string, previous: string[]): string[] {
-  const experimentId = value.trim().toLowerCase();
-  if (!VALID_EXPERIMENT_IDS.has(experimentId)) {
-    throw new Error(
-      `Unknown experiment "${value}". Valid experiments: ${[...VALID_EXPERIMENT_IDS].join(", ")}`
-    );
-  }
-  if (previous.includes(experimentId)) {
-    return previous; // Dedupe
-  }
-  return [...previous, experimentId];
-}
-
-/**
- * Convert experiment ID array to the experiments object expected by SendMessageOptions.
- */
-function buildExperimentsObject(experimentIds: string[]): SendMessageOptions["experiments"] {
-  if (experimentIds.length === 0) return undefined;
-
-  return {
-    programmaticToolCalling: experimentIds.includes("programmatic-tool-calling"),
-    programmaticToolCallingExclusive: experimentIds.includes("programmatic-tool-calling-exclusive"),
-    system1: experimentIds.includes("system-1"),
-    execSubagentHardRestart: experimentIds.includes("exec-subagent-hard-restart"),
-  };
-}
-
 interface MCPServerEntry {
   name: string;
   command: string;
@@ -256,7 +226,6 @@ program
   .option("-q, --quiet", "only output final result")
   .option("--mcp <server>", "MCP server as name=command (can be repeated)", collectMcpServers, [])
   .option("--no-mcp-config", "ignore global + repo MCP config files (use only --mcp servers)")
-  .option("-e, --experiment <id>", "enable experiment (can be repeated)", collectExperiments, [])
   .option("-b, --budget <usd>", "stop when session cost exceeds budget (USD)", parseFloat)
   .option("--service-tier <tier>", "OpenAI service tier: auto, default, flex, priority", "auto")
   .option("--use-1m", "enable 1M context window for supported Anthropic models")
@@ -295,7 +264,6 @@ interface CLIOptions {
   quiet?: boolean;
   mcp: MCPServerEntry[];
   mcpConfig: boolean;
-  experiment: string[];
   budget?: number;
   serviceTier: "auto" | "default" | "flex" | "priority";
   use1m?: boolean;
@@ -565,13 +533,10 @@ async function main(): Promise<number> {
   // Calling initialize() on a fresh config is a no-op, but skipping it makes the intent
   // clear and avoids any risk of cross-workspace side effects if config were ever shared.
 
-  const experiments = buildExperimentsObject(opts.experiment);
-
   const buildSendOptions = (cliMode: CLIMode): SendMessageOptions => ({
     model,
     thinkingLevel,
     agentId: cliMode,
-    experiments,
     providerOptions: {
       ...(opts.use1m && { anthropic: { use1MContext: true } }),
       openai: { serviceTier: opts.serviceTier },

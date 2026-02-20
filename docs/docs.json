@@ -121,7 +121,6 @@
           {
             "group": "Reference",
             "pages": [
-              "reference/telemetry",
               "reference/storybook",
               "reference/benchmarking",
               "AGENTS"
@@ -175,7 +174,6 @@
     { "source": "/vim-mode", "destination": "/config/vim-mode" },
     { "source": "/guides/vim-mode", "destination": "/config/vim-mode" },
     { "source": "/vscode-extension", "destination": "/integrations/vscode-extension" },
-    { "source": "/telemetry", "destination": "/reference/telemetry" },
     { "source": "/storybook", "destination": "/reference/storybook" },
     { "source": "/benchmarking", "destination": "/reference/benchmarking" }
   ]

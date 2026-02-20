@@ -40,7 +40,6 @@ import {
   updatePersistedState,
   usePersistedState,
 } from "@/browser/hooks/usePersistedState";
-import { useLinkSharingEnabled } from "@/browser/contexts/TelemetryEnabledContext";
 import { useAPI } from "@/browser/contexts/API";
 import type { SigningCapabilities } from "@/common/orpc/schemas";
 import { EncryptionBadge, SigningBadge } from "./ShareSigningBadges";
@@ -61,8 +60,6 @@ export const ShareMessagePopover: React.FC<ShareMessagePopoverProps> = ({
   disabled = false,
   workspaceName,
 }) => {
-  // Hide share button when user explicitly disabled telemetry
-  const linkSharingEnabled = useLinkSharingEnabled();
   const { api } = useAPI();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -368,11 +365,6 @@ export const ShareMessagePopover: React.FC<ShareMessagePopoverProps> = ({
 
   const currentExpiration = timestampToExpiration(shareData?.expiresAt);
   const isBusy = isUploading || isUpdating || isDeleting;
-
-  // Don't render the share button if link sharing is disabled or still loading
-  if (linkSharingEnabled !== true) {
-    return null;
-  }
 
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>

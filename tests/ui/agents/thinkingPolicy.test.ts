@@ -8,7 +8,6 @@ import { fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { updatePersistedState } from "@/browser/hooks/usePersistedState";
-import { EXPERIMENT_IDS, getExperimentKey } from "@/common/constants/experiments";
 import {
   PREFERRED_SYSTEM_1_MODEL_KEY,
   PREFERRED_SYSTEM_1_THINKING_LEVEL_KEY,
@@ -37,7 +36,6 @@ describeIntegration("System 1 reasoning policy", () => {
     const harness = await createAppHarness({
       branchPrefix: "system1",
       beforeRender() {
-        updatePersistedState(getExperimentKey(EXPERIMENT_IDS.SYSTEM_1), true);
         updatePersistedState(PREFERRED_SYSTEM_1_MODEL_KEY, GEMINI_FLASH_PREVIEW);
         updatePersistedState(PREFERRED_SYSTEM_1_THINKING_LEVEL_KEY, "xhigh");
       },

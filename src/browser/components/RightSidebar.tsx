@@ -11,7 +11,6 @@ import {
   updatePersistedState,
   usePersistedState,
 } from "@/browser/hooks/usePersistedState";
-import { useFeatureFlags } from "@/browser/contexts/FeatureFlagsContext";
 import { useAPI } from "@/browser/contexts/API";
 import { CostsTab } from "./RightSidebar/CostsTab";
 
@@ -612,9 +611,7 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
     listener: true,
   });
 
-  // Stats tab feature flag
-  const { statsTabState } = useFeatureFlags();
-  const statsTabEnabled = Boolean(statsTabState?.enabled);
+  const statsTabEnabled = true;
 
   // Read last-used focused tab for better defaults when initializing a new layout.
   const initialActiveTab = React.useMemo<TabType>(() => {
@@ -671,25 +668,17 @@ const RightSidebarComponent: React.FC<RightSidebarProps> = ({
     [layoutDraft, layoutRaw, initialActiveTab]
   );
 
-  // If the Stats tab feature is enabled, ensure it exists in the layout.
-  // If disabled, ensure it doesn't linger in persisted layouts.
+  // Ensure stats exists in persisted layouts.
   React.useEffect(() => {
     setLayoutRaw((prevRaw) => {
       const prev = parseRightSidebarLayoutState(prevRaw, initialActiveTab);
       const hasStats = collectAllTabs(prev.root).includes("stats");
-
-      if (statsTabEnabled && !hasStats) {
-        // Add stats tab to the focused tabset without stealing focus.
+      if (!hasStats) {
         return addTabToFocusedTabset(prev, "stats", false);
       }
-
-      if (!statsTabEnabled && hasStats) {
-        return removeTabEverywhere(prev, "stats");
-      }
-
       return prev;
     });
-  }, [initialActiveTab, setLayoutRaw, statsTabEnabled]);
+  }, [initialActiveTab, setLayoutRaw]);
   // If we ever deserialize an invalid layout (e.g. schema changes), reset to defaults.
   React.useEffect(() => {
     if (!isRightSidebarLayoutState(layoutRaw)) {

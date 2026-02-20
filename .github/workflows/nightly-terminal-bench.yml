@@ -14,10 +14,6 @@ on:
         required: false
         default: "all"
         type: string
-      experiments:
-        description: "Experiments to enable (comma-separated)"
-        required: false
-        type: string
 
 jobs:
   # Smoke test: run chess-best-move task first to catch broken agent setup
@@ -32,7 +28,6 @@ jobs:
       concurrency: "1"
       env: "daytona"
       task_names: "chess-best-move"
-      experiments: ${{ inputs.experiments }}
     secrets: inherit # zizmor: ignore[secrets-inherit]
 
   # Smoke tests for Harbor SWE-style datasets (single task each).
@@ -51,7 +46,6 @@ jobs:
       task_names: "django__django-10097"
       mux_project_path: "/testbed"
       timeout: "3000"
-      experiments: ${{ inputs.experiments }}
     secrets: inherit # zizmor: ignore[secrets-inherit]
 
   swe-gen-js-smoke-test:
@@ -67,7 +61,6 @@ jobs:
       task_names: "biomejs__biome-7314"
       mux_project_path: "/app/src"
       timeout: "600"
-      experiments: ${{ inputs.experiments }}
     secrets: inherit # zizmor: ignore[secrets-inherit]
 
   aider-polyglot-smoke-test:
@@ -83,7 +76,6 @@ jobs:
       task_names: "polyglot_cpp_all-your-base"
       mux_project_path: "/app"
       timeout: "1800"
-      experiments: ${{ inputs.experiments }}
     secrets: inherit # zizmor: ignore[secrets-inherit]
 
   determine-models:
@@ -122,5 +114,4 @@ jobs:
       dataset: "terminal-bench@2.0"
       concurrency: "48"
       env: "daytona"
-      experiments: ${{ inputs.experiments }}
     secrets: inherit # zizmor: ignore[secrets-inherit]

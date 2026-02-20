@@ -83,16 +83,6 @@ export const WorkspaceConfigSchema = z.object({
     description:
       "Initial prompt for a queued agent task (persisted only until the task actually starts).",
   }),
-  taskExperiments: z
-    .object({
-      programmaticToolCalling: z.boolean().optional(),
-      programmaticToolCallingExclusive: z.boolean().optional(),
-      execSubagentHardRestart: z.boolean().optional(),
-    })
-    .optional()
-    .meta({
-      description: "Experiments inherited from parent for restart-safe resumptions.",
-    }),
   taskBaseCommitSha: z.string().optional().meta({
     description:
       "Git commit SHA this agent task workspace started from (used for generating git-format-patch artifacts).",

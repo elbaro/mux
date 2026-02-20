@@ -470,7 +470,7 @@ export function addToolToFocusedTabset(
 
 /**
  * Add a tab to the focused tabset without changing the active tab.
- * Used for feature-flagged tabs that should be available but not auto-selected.
+ * Used for tabs that should be available but not auto-selected.
  */
 export function addTabToFocusedTabset(
   state: RightSidebarLayoutState,

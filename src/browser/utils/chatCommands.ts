@@ -55,7 +55,6 @@ import {
   createCommandToast,
   createInvalidCompactModelToast,
 } from "@/browser/components/ChatInputToasts";
-import { trackCommandUsed } from "@/common/telemetry";
 import { addEphemeralMessage } from "@/browser/stores/WorkspaceStore";
 
 const BUILT_IN_MODEL_SET = new Set<string>(Object.values(KNOWN_MODELS).map((model) => model.id));
@@ -227,7 +226,7 @@ export async function processSlashCommand(
 
       setInput("");
       setPreferredModel(canonicalModel);
-      trackCommandUsed("model");
+
       setToast({
         id: Date.now().toString(),
         type: "success",
@@ -317,7 +316,7 @@ export async function processSlashCommand(
   if (parsed.type === "vim-toggle") {
     setInput("");
     setVimEnabled((prev) => !prev);
-    trackCommandUsed("vim");
+
     return { clearInput: true, toastShown: false };
   }
 
@@ -434,7 +433,7 @@ async function handleClearCommand(
 
   try {
     await onTruncateHistory(1.0);
-    trackCommandUsed("clear");
+
     setToast({
       id: Date.now().toString(),
       type: "success",
@@ -524,7 +523,7 @@ async function handleForkCommand(
       });
       return { clearInput: false, toastShown: true };
     } else {
-      trackCommandUsed("fork");
+
       const displayName =
         forkResult.workspaceInfo?.title ?? forkResult.workspaceInfo?.name ?? "new workspace";
       setToast({
@@ -992,7 +991,7 @@ export async function handleNewCommand(
       return { clearInput: false, toastShown: true };
     }
 
-    trackCommandUsed("new");
+
     setToast({
       id: Date.now().toString(),
       type: "success",
@@ -1081,7 +1080,7 @@ export async function handleCompactCommand(
       return { clearInput: false, toastShown: true };
     }
 
-    trackCommandUsed("compact");
+
     setToast({
       id: Date.now().toString(),
       type: "success",
@@ -1144,7 +1143,7 @@ export async function handlePlanShowCommand(
   };
   addEphemeralMessage(workspaceId, planMessage);
 
-  trackCommandUsed("plan");
+
   return { clearInput: true, toastShown: false };
 }
 
@@ -1184,7 +1183,7 @@ export async function handlePlanOpenCommand(
     return { clearInput: true, toastShown: true };
   }
 
-  trackCommandUsed("plan");
+
   setToast({
     id: Date.now().toString(),
     type: "success",

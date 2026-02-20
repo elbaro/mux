@@ -5,15 +5,7 @@ import * as path from "path";
 
 import { Config } from "@/node/config";
 import { SessionTimingService } from "./sessionTimingService";
-import type { TelemetryService } from "./telemetryService";
 import { normalizeGatewayModel } from "@/common/utils/ai/models";
-
-function createMockTelemetryService(): Pick<TelemetryService, "capture" | "getFeatureFlag"> {
-  return {
-    capture: mock(() => undefined),
-    getFeatureFlag: mock(() => Promise.resolve(undefined)),
-  };
-}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -36,8 +28,7 @@ describe("SessionTimingService", () => {
   });
 
   it("persists aborted stream stats to session-timing.json", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -116,8 +107,7 @@ describe("SessionTimingService", () => {
   });
 
   it("ignores empty aborted streams", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -153,8 +143,7 @@ describe("SessionTimingService", () => {
 
   describe("rollUpTimingIntoParent", () => {
     it("should roll up child timing into parent without changing parent's lastRequest", async () => {
-      const telemetry = createMockTelemetryService();
-      const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+      const service = new SessionTimingService(config);
       service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
       const projectPath = "/tmp/mux-session-timing-rollup-test-project";
@@ -313,8 +302,7 @@ describe("SessionTimingService", () => {
     });
 
     it("should be idempotent for the same child workspace", async () => {
-      const telemetry = createMockTelemetryService();
-      const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+      const service = new SessionTimingService(config);
       service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
       const projectPath = "/tmp/mux-session-timing-rollup-test-project";
@@ -391,8 +379,7 @@ describe("SessionTimingService", () => {
     });
   });
   it("persists completed stream stats to session-timing.json", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -487,8 +474,7 @@ describe("SessionTimingService", () => {
   });
 
   it("uses agentId for the per-model breakdown when available", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -548,8 +534,7 @@ describe("SessionTimingService", () => {
   });
 
   it("ignores replayed events so timing stats aren't double-counted", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -681,8 +666,7 @@ describe("SessionTimingService", () => {
   });
 
   it("does not double-count overlapping tool calls", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -785,9 +769,8 @@ describe("SessionTimingService", () => {
     expect(snapshot.lastRequest?.invalid).toBe(false);
   });
 
-  it("emits invalid timing telemetry when tool percent would exceed 100%", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+  it("marks timing as invalid when tool percent would exceed 100%", async () => {
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -844,30 +827,12 @@ describe("SessionTimingService", () => {
 
     await service.waitForIdle(workspaceId);
 
-    expect(telemetry.capture).toHaveBeenCalled();
-
-    // Bun's mock() returns a callable with `.mock.calls`, but our TelemetryService typing
-    // does not expose that. Introspect via unknown.
-    const calls = (telemetry.capture as unknown as { mock: { calls: Array<[unknown]> } }).mock
-      .calls;
-
-    const invalidCalls = calls.filter((c) => {
-      const payload = c[0];
-      if (!payload || typeof payload !== "object") {
-        return false;
-      }
-
-      return (
-        "event" in payload && (payload as { event?: unknown }).event === "stream_timing_invalid"
-      );
-    });
-
-    expect(invalidCalls.length).toBeGreaterThan(0);
+    const snapshot = await service.getSnapshot(workspaceId);
+    expect(snapshot.lastRequest?.invalid).toBe(true);
   });
 
   it("throttles delta-driven change events per workspace", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";
@@ -933,8 +898,7 @@ describe("SessionTimingService", () => {
   });
 
   it("clears scheduled delta emits when the last subscriber disconnects", async () => {
-    const telemetry = createMockTelemetryService();
-    const service = new SessionTimingService(config, telemetry as unknown as TelemetryService);
+    const service = new SessionTimingService(config);
     service.setStatsTabState({ enabled: true, variant: "stats", override: "default" });
 
     const workspaceId = "test-workspace";

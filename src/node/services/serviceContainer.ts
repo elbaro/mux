@@ -26,7 +26,6 @@ import { TokenizerService } from "@/node/services/tokenizerService";
 import { ServerService } from "@/node/services/serverService";
 import { MenuEventService } from "@/node/services/menuEventService";
 import { VoiceService } from "@/node/services/voiceService";
-import { TelemetryService } from "@/node/services/telemetryService";
 import type {
   ReasoningDeltaEvent,
   StreamAbortEvent,
@@ -37,9 +36,7 @@ import type {
   ToolCallEndEvent,
   ToolCallStartEvent,
 } from "@/common/types/stream";
-import { FeatureFlagService } from "@/node/services/featureFlagService";
 import { SessionTimingService } from "@/node/services/sessionTimingService";
-import { ExperimentsService } from "@/node/services/experimentsService";
 import { WorkspaceMcpOverridesService } from "@/node/services/workspaceMcpOverridesService";
 import { McpOauthService } from "@/node/services/mcpOauthService";
 import { IdleCompactionService } from "@/node/services/idleCompactionService";
@@ -109,10 +106,7 @@ export class ServiceContainer {
   public readonly voiceService: VoiceService;
   public readonly mcpOauthService: McpOauthService;
   public readonly workspaceMcpOverridesService: WorkspaceMcpOverridesService;
-  public readonly telemetryService: TelemetryService;
-  public readonly featureFlagService: FeatureFlagService;
   public readonly sessionTimingService: SessionTimingService;
-  public readonly experimentsService: ExperimentsService;
   public readonly signingService: SigningService;
   public readonly policyService: PolicyService;
   public readonly coderService: CoderService;
@@ -127,12 +121,7 @@ export class ServiceContainer {
     // Cross-cutting services: created first so they can be passed to core
     // services via constructor params (no setter injection needed).
     this.policyService = new PolicyService(config);
-    this.telemetryService = new TelemetryService(config.rootDir);
-    this.experimentsService = new ExperimentsService({
-      telemetryService: this.telemetryService,
-      muxHome: config.rootDir,
-    });
-    this.sessionTimingService = new SessionTimingService(config, this.telemetryService);
+    this.sessionTimingService = new SessionTimingService(config);
 
     // Desktop passes WorkspaceMcpOverridesService explicitly so AIService uses
     // the persistent config rather than creating a default with an ephemeral one.
@@ -143,8 +132,6 @@ export class ServiceContainer {
       extensionMetadataPath: path.join(config.rootDir, "extensionMetadata.json"),
       workspaceMcpOverridesService: this.workspaceMcpOverridesService,
       policyService: this.policyService,
-      telemetryService: this.telemetryService,
-      experimentsService: this.experimentsService,
       sessionTimingService: this.sessionTimingService,
     });
 
@@ -173,8 +160,7 @@ export class ServiceContainer {
     this.mcpOauthService = new McpOauthService(
       config,
       this.mcpConfigService,
-      this.windowService,
-      this.telemetryService
+      this.windowService
     );
     this.mcpServerManager.setMcpOauthService(this.mcpOauthService);
 
@@ -206,7 +192,6 @@ export class ServiceContainer {
     this.serverService = new ServerService();
     this.menuEventService = new MenuEventService();
     this.voiceService = new VoiceService(config);
-    this.featureFlagService = new FeatureFlagService(config, this.telemetryService);
     this.signingService = getSigningService();
     this.coderService = coderService;
 
@@ -234,7 +219,7 @@ export class ServiceContainer {
     setHostKeyVerificationService(this.hostKeyVerificationService);
     setSSH2HostKeyVerificationService(this.hostKeyVerificationService);
 
-    // Backend timing stats (behind feature flag).
+    // Backend timing stats.
     this.aiService.on("stream-start", (data: StreamStartEvent) =>
       this.sessionTimingService.handleStreamStart(data)
     );
@@ -263,20 +248,10 @@ export class ServiceContainer {
 
   async initialize(): Promise<void> {
     await this.extensionMetadata.initialize();
-    // Initialize telemetry service
-    await this.telemetryService.initialize();
 
     // Initialize policy service (startup gating)
     await this.policyService.initialize();
 
-    // Initialize feature flag state (don't block startup on network).
-    this.featureFlagService
-      .getStatsTabState()
-      .then((state) => this.sessionTimingService.setStatsTabState(state))
-      .catch(() => {
-        // Ignore feature flag failures.
-      });
-    await this.experimentsService.initialize();
     await this.taskService.initialize();
     // Start idle compaction checker
     this.idleCompactionService.start();
@@ -437,10 +412,7 @@ export class ServiceContainer {
       mcpOauthService: this.mcpOauthService,
       workspaceMcpOverridesService: this.workspaceMcpOverridesService,
       mcpServerManager: this.mcpServerManager,
-      featureFlagService: this.featureFlagService,
       sessionTimingService: this.sessionTimingService,
-      telemetryService: this.telemetryService,
-      experimentsService: this.experimentsService,
       sessionUsageService: this.sessionUsageService,
       policyService: this.policyService,
       signingService: this.signingService,
@@ -455,7 +427,6 @@ export class ServiceContainer {
    */
   async shutdown(): Promise<void> {
     this.idleCompactionService.stop();
-    await this.telemetryService.shutdown();
   }
 
   setProjectDirectoryPicker(picker: () => Promise<string | null>): void {

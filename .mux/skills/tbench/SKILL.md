@@ -91,7 +91,6 @@ TB_TIMEOUT=600 make benchmark-terminal TB_SAMPLE_SIZE=5
 The agent adapter accepts a few Harbor kwargs (passed via `--agent-kwarg`):
 
 - `model_name`: Model to use (e.g., `anthropic/claude-sonnet-4-5`, `openai/gpt-5-codex`)
-- `experiments`: Experiments to enable, comma-separated (e.g., `programmatic-tool-calling`)
 
 All other `mux run` CLI flags (thinking level, mode, runtime, budget, etc.) are passed via `MUX_RUN_ARGS` — no per-flag plumbing needed.
 
@@ -115,8 +114,6 @@ gh workflow run terminal-bench.yml \
 # Pass flags via MUX_RUN_ARGS env var
 MUX_RUN_ARGS="--thinking high --use-1m" make benchmark-terminal
 
-# Model and experiments via TB_ARGS
-make benchmark-terminal TB_ARGS="--agent-kwarg model_name=openai/gpt-5-codex --agent-kwarg experiments=programmatic-tool-calling"
 ```
 
 ## Results
@@ -139,7 +136,6 @@ Mux Terminal-Bench results are uploaded to BigQuery after CI runs. Query via `bq
 
 **Table:** `mux-benchmarks.benchmarks.tbench_results`
 
-**Schema:** `run_id` (STRING), `task_id` (STRING), `model_name` (STRING), `thinking_level` (STRING: off/low/medium/high), `mode` (STRING: plan/exec), `dataset` (STRING), `experiments` (STRING), `passed` (BOOL), `score` (FLOAT), `n_input_tokens` (INT), `n_output_tokens` (INT), `github_run_id` (INT), `github_sha` (STRING), `ingested_at` (TIMESTAMP).
 
 See `.github/workflows/terminal-bench.yml` and `.github/workflows/nightly-terminal-bench.yml` for GitHub Actions integration.
 

@@ -22,7 +22,6 @@ import { useGitStatus } from "@/browser/stores/GitStatusStore";
 import { useWorkspaceSidebarState } from "@/browser/stores/WorkspaceStore";
 import { Button } from "@/browser/components/ui/button";
 import type { RuntimeConfig } from "@/common/types/runtime";
-import { useLinkSharingEnabled } from "@/browser/contexts/TelemetryEnabledContext";
 import { useTutorial } from "@/browser/contexts/TutorialContext";
 
 import type { TerminalSessionCreateOptions } from "@/browser/utils/terminal";
@@ -80,7 +79,8 @@ export const WorkspaceMenuBar: React.FC<WorkspaceMenuBarProps> = ({
   const { disableWorkspaceAgents } = useAgent();
   const { archiveWorkspace } = useWorkspaceActions();
   const isMuxHelpChat = workspaceId === MUX_HELP_CHAT_WORKSPACE_ID;
-  const linkSharingEnabled = useLinkSharingEnabled();
+  // Link sharing is always enabled.
+  const linkSharingEnabled = true;
   const openTerminalPopout = useOpenTerminal();
   const openInEditor = useOpenInEditor();
   const gitStatus = useGitStatus(workspaceId);

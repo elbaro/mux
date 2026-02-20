@@ -19,10 +19,10 @@ describe("agents.list disabled agents", () => {
     await fs.writeFile(
       path.join(agentsDir, "experimental.md"),
       `---
-name: Experimental
+name: Optional
 disabled: true
 ---
-Experimental agent body.
+Optional agent body.
 `,
       "utf-8"
     );

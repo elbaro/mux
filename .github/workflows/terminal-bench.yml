@@ -30,10 +30,6 @@ on:
         description: "Additional arguments to pass to harbor"
         required: false
         type: string
-      experiments:
-        description: "Experiments to enable (comma-separated)"
-        required: false
-        type: string
       timeout:
         description: "Agent timeout in seconds (default: 1800 = 30 min)"
         required: false
@@ -98,10 +94,6 @@ on:
         description: "Additional arguments to pass to harbor"
         required: false
         type: string
-      experiments:
-        description: "Experiments to enable (comma-separated)"
-        required: false
-        type: string
       timeout:
         description: "Agent timeout in seconds (default: 1800 = 30 min)"
         required: false
@@ -161,7 +153,6 @@ jobs:
           TB_ARGS: >-
             ${{ inputs.max_tasks && format('--n-tasks {0}', inputs.max_tasks) || '' }}
             ${{ inputs.extra_args || '' }}
-          MUX_EXPERIMENTS: ${{ inputs.experiments }}
           MUX_RUN_ARGS: ${{ inputs.mux_run_args }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -256,7 +247,6 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           GCP_PROJECT_ID: mux-benchmarks
           BQ_DATASET: benchmarks
-          MUX_EXPERIMENTS: ${{ inputs.experiments }}
         run: |
           if [ -z "$GCP_SA_KEY" ]; then
             echo "GCP_SA_KEY not set, skipping BigQuery upload"
@@ -274,7 +264,6 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           GCP_PROJECT_ID: mux-benchmarks
           BQ_DATASET: benchmarks
-          MUX_EXPERIMENTS: ${{ inputs.experiments }}
         run: |
           if [ -z "$GCP_SA_KEY" ]; then
             echo "GCP_SA_KEY not set, skipping BigQuery upload"

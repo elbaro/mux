@@ -5,7 +5,6 @@ import type { WorkspaceStatsSnapshot } from "@/common/orpc/types";
 import { usePersistedState } from "@/browser/hooks/usePersistedState";
 import { useWorkspaceStatsSnapshot } from "@/browser/stores/WorkspaceStore";
 import { ToggleGroup, type ToggleOption } from "../ToggleGroup";
-import { useTelemetry } from "@/browser/hooks/useTelemetry";
 import { computeTimingPercentages } from "@/browser/utils/timingPercentages";
 import { calculateAverageTPS } from "@/browser/utils/messages/StreamingTPSCalculator";
 
@@ -77,7 +76,6 @@ export interface StatsTabProps {
 export function StatsTab(props: StatsTabProps) {
   const liveSnapshot = useWorkspaceStatsSnapshot(props.workspaceId);
   const snapshot = props._snapshot ?? liveSnapshot;
-  const telemetry = useTelemetry();
   const [viewMode, setViewMode] = usePersistedState<ViewMode>("statsTab:viewMode", "session");
   const [showModeBreakdown, setShowModeBreakdown] = usePersistedState<boolean>(
     "statsTab:showModeBreakdown",
@@ -86,10 +84,6 @@ export function StatsTab(props: StatsTabProps) {
 
   const [isClearing, setIsClearing] = React.useState(false);
   const [clearError, setClearError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    telemetry.statsTabOpened(viewMode, showModeBreakdown);
-  }, [telemetry, viewMode, showModeBreakdown]);
 
   const active = snapshot?.active;
   const session = snapshot?.session;

@@ -197,7 +197,7 @@ export const ManyWorkspaces: AppStory = {
           "bugfix/memory-leak",
           "bugfix/login-redirect",
           "refactor/components",
-          "experiment/new-ui",
+          "topic/new-ui",
           "release/v1.2.0",
         ];
 
@@ -685,8 +685,8 @@ export const ArchivingWorkspaceAlignment: AppStory = {
           }),
           createWorkspace({
             id: "ws-to-archive",
-            name: "feature/old-experiment",
-            title: "Old experiment workspace",
+            name: "feature/old-legacy",
+            title: "Old legacy workspace",
             projectName: "my-app",
             projectPath,
             createdAt: new Date(NOW - 7200000).toISOString(),
@@ -729,7 +729,7 @@ export const ArchivingWorkspaceAlignment: AppStory = {
     await userEvent.hover(row);
 
     // Click the overflow menu button
-    const menuButton = within(row).getByLabelText("Workspace actions for Old experiment workspace");
+    const menuButton = within(row).getByLabelText("Workspace actions for Old legacy workspace");
     await userEvent.click(menuButton);
 
     // Wait for the popover to open, then click "Archive chat"

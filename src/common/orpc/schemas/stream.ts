@@ -517,14 +517,6 @@ export const ToolPolicySchema = z.array(ToolPolicyFilterSchema).meta({
     "Tool policy - array of filters applied in order. Default behavior is allow all tools.",
 });
 
-// Experiments schema for feature gating
-export const ExperimentsSchema = z.object({
-  programmaticToolCalling: z.boolean().optional(),
-  programmaticToolCallingExclusive: z.boolean().optional(),
-  system1: z.boolean().optional(),
-  execSubagentHardRestart: z.boolean().optional(),
-});
-
 // SendMessage options
 export const SendMessageOptionsSchema = z.object({
   editMessageId: z.string().optional(),
@@ -547,7 +539,6 @@ export const SendMessageOptionsSchema = z.object({
    * When true, skip persisting AI settings (e.g., for one-shot or compaction sends).
    */
   skipAiSettingsPersistence: z.boolean().optional(),
-  experiments: ExperimentsSchema.optional(),
   /**
    * When true, workspace-specific agent definitions are disabled.
    * Only built-in and global agents are loaded. Useful for "unbricking" when

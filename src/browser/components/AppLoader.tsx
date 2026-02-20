@@ -15,7 +15,6 @@ import { APIProvider, useAPI, type APIClient } from "@/browser/contexts/API";
 import { useIdleCompactionHandler } from "@/browser/hooks/useIdleCompactionHandler";
 import { WorkspaceProvider, useWorkspaceContext } from "../contexts/WorkspaceContext";
 import { RouterProvider } from "../contexts/RouterContext";
-import { TelemetryEnabledProvider } from "../contexts/TelemetryEnabledContext";
 import { TerminalRouterProvider } from "../terminal/TerminalRouterContext";
 
 interface AppLoaderProps {
@@ -157,10 +156,8 @@ function AppLoaderInner() {
 
   // Render App - all state available via contexts
   return (
-    <TelemetryEnabledProvider>
-      <TerminalRouterProvider>
-        <App />
-      </TerminalRouterProvider>
-    </TelemetryEnabledProvider>
+    <TerminalRouterProvider>
+      <App />
+    </TerminalRouterProvider>
   );
 }

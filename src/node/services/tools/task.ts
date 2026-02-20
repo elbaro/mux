@@ -89,7 +89,6 @@ export const createTaskTool: ToolFactory = (config: ToolConfiguration) => {
         title,
         modelString,
         thinkingLevel,
-        experiments: config.experiments,
       });
 
       if (!created.success) {

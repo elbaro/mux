@@ -52,7 +52,6 @@ import {
 import { WorkspaceMenuBar } from "./WorkspaceMenuBar";
 import type { DisplayedMessage, QueuedMessage as QueuedMessageData } from "@/common/types/message";
 import type { RuntimeConfig } from "@/common/types/runtime";
-import { getRuntimeTypeForTelemetry } from "@/common/telemetry";
 import { useAIViewKeybinds } from "@/browser/hooks/useAIViewKeybinds";
 import { QueuedMessage } from "./Messages/QueuedMessage";
 import { CompactionWarning } from "./CompactionWarning";
@@ -1018,7 +1017,6 @@ const ChatInputPane: React.FC<ChatInputPaneProps> = (props) => {
         key={props.workspaceId}
         variant="workspace"
         workspaceId={props.workspaceId}
-        runtimeType={getRuntimeTypeForTelemetry(props.runtimeConfig)}
         onMessageSent={props.onMessageSent}
         onTruncateHistory={props.onTruncateHistory}
         onModelChange={props.onModelChange}

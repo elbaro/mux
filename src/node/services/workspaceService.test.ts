@@ -696,8 +696,6 @@ describe("WorkspaceService remove timing rollup", () => {
         mockBackgroundProcessManager as BackgroundProcessManager,
         undefined, // sessionUsageService
         undefined, // policyService
-        undefined, // telemetryService
-        undefined, // experimentsService
         timingService as SessionTimingService
       );
 

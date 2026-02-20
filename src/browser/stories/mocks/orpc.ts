@@ -500,10 +500,6 @@ export function createMockORPCClient(options: MockORPCClientOptions = {}): APICl
         return Promise.resolve(getStatsTabState());
       },
     },
-    telemetry: {
-      track: () => Promise.resolve(undefined),
-      status: () => Promise.resolve({ enabled: true, explicit: false }),
-    },
     splashScreens: {
       getViewedSplashScreens: () => Promise.resolve(["onboarding-wizard-v1"]),
       markSplashScreenViewed: () => Promise.resolve(undefined),

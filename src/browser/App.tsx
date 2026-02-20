@@ -52,8 +52,6 @@ import {
 import { migrateGatewayModel } from "@/browser/hooks/useGatewayModels";
 import { getDefaultModel } from "@/browser/hooks/useModelsFromSettings";
 import type { BranchListResult } from "@/common/orpc/types";
-import { useTelemetry } from "./hooks/useTelemetry";
-import { getRuntimeTypeForTelemetry } from "@/common/telemetry";
 import { useStartWorkspaceCreation, getFirstProjectPath } from "./hooks/useStartWorkspaceCreation";
 import { useAPI } from "@/browser/contexts/API";
 import {
@@ -75,10 +73,7 @@ import { SplashScreenProvider } from "./components/splashScreens/SplashScreenPro
 import { TutorialProvider } from "./contexts/TutorialContext";
 import { PowerModeProvider } from "./contexts/PowerModeContext";
 import { TooltipProvider } from "./components/ui/tooltip";
-import { useFeatureFlags } from "./contexts/FeatureFlagsContext";
 import { UILayoutsProvider, useUILayouts } from "@/browser/contexts/UILayoutsContext";
-import { FeatureFlagsProvider } from "./contexts/FeatureFlagsContext";
-import { ExperimentsProvider } from "./contexts/ExperimentsContext";
 import { ProviderOptionsProvider } from "./contexts/ProviderOptionsContext";
 import { getWorkspaceSidebarKey } from "./utils/workspace";
 import { WindowsToolchainBanner } from "./components/WindowsToolchainBanner";
@@ -187,32 +182,19 @@ function AppInner() {
     setSidebarCollapsed((prev) => !prev);
   }, [setSidebarCollapsed]);
 
-  // Telemetry tracking
-  const telemetry = useTelemetry();
-
   // Get workspace store for command palette
   const workspaceStore = useWorkspaceStoreRaw();
 
-  const { statsTabState } = useFeatureFlags();
   useEffect(() => {
-    workspaceStore.setStatsEnabled(Boolean(statsTabState?.enabled));
-  }, [workspaceStore, statsTabState?.enabled]);
+    workspaceStore.setStatsEnabled(true);
+  }, [workspaceStore]);
 
-  // Track telemetry when workspace selection changes
-  const prevWorkspaceRef = useRef<WorkspaceSelection | null>(null);
   // Ref for selectedWorkspace to access in callbacks without stale closures
   const selectedWorkspaceRef = useRef(selectedWorkspace);
   selectedWorkspaceRef.current = selectedWorkspace;
   // Ref for route-level workspace visibility to avoid stale closure in response callbacks
   const currentWorkspaceIdRef = useRef(currentWorkspaceId);
   currentWorkspaceIdRef.current = currentWorkspaceId;
-  useEffect(() => {
-    const prev = prevWorkspaceRef.current;
-    if (prev && selectedWorkspace && prev.workspaceId !== selectedWorkspace.workspaceId) {
-      telemetry.workspaceSwitched(prev.workspaceId, selectedWorkspace.workspaceId);
-    }
-    prevWorkspaceRef.current = selectedWorkspace;
-  }, [selectedWorkspace, telemetry]);
 
   // Track last-read timestamps for unread indicators.
   // Read-marking is gated on chat-route visibility (currentWorkspaceId).
@@ -1030,12 +1012,6 @@ function AppInner() {
                         });
                       }
 
-                      // Track telemetry
-                      telemetry.workspaceCreated(
-                        metadata.id,
-                        getRuntimeTypeForTelemetry(metadata.runtimeConfig)
-                      );
-
                       // Note: No need to call clearPendingWorkspaceCreation() here.
                       // Navigating to the workspace URL automatically clears the pending
                       // state since pendingNewWorkspaceProject is derived from the URL.
@@ -1115,31 +1091,27 @@ function AppInner() {
 
 function App() {
   return (
-    <ExperimentsProvider>
-      <FeatureFlagsProvider>
-        <UILayoutsProvider>
-          <TooltipProvider delayDuration={200}>
-            <SettingsProvider>
-              <AboutDialogProvider>
-                <ProviderOptionsProvider>
-                  <SplashScreenProvider>
-                    <TutorialProvider>
-                      <CommandRegistryProvider>
-                        <PowerModeProvider>
-                          <ConfirmDialogProvider>
-                            <AppInner />
-                          </ConfirmDialogProvider>
-                        </PowerModeProvider>
-                      </CommandRegistryProvider>
-                    </TutorialProvider>
-                  </SplashScreenProvider>
-                </ProviderOptionsProvider>
-              </AboutDialogProvider>
-            </SettingsProvider>
-          </TooltipProvider>
-        </UILayoutsProvider>
-      </FeatureFlagsProvider>
-    </ExperimentsProvider>
+    <UILayoutsProvider>
+      <TooltipProvider delayDuration={200}>
+        <SettingsProvider>
+          <AboutDialogProvider>
+            <ProviderOptionsProvider>
+              <SplashScreenProvider>
+                <TutorialProvider>
+                  <CommandRegistryProvider>
+                    <PowerModeProvider>
+                      <ConfirmDialogProvider>
+                        <AppInner />
+                      </ConfirmDialogProvider>
+                    </PowerModeProvider>
+                  </CommandRegistryProvider>
+                </TutorialProvider>
+              </SplashScreenProvider>
+            </ProviderOptionsProvider>
+          </AboutDialogProvider>
+        </SettingsProvider>
+      </TooltipProvider>
+    </UILayoutsProvider>
   );
 }
 

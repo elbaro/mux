@@ -56,25 +56,6 @@ import {
 } from "./mcp";
 import { PolicyGetResponseSchema } from "./policy";
 
-// Experiments
-export const ExperimentValueSchema = z.object({
-  value: z.union([z.string(), z.boolean(), z.null()]),
-  source: z.enum(["posthog", "cache", "disabled"]),
-});
-
-export const experiments = {
-  getAll: {
-    input: z.void(),
-    output: z.record(z.string(), ExperimentValueSchema),
-  },
-  reload: {
-    input: z.void(),
-    output: z.void(),
-  },
-};
-// Re-export telemetry schemas
-export { telemetry, TelemetryEventSchema } from "./telemetry";
-
 // Re-export signing schemas
 export { signing, type SigningCapabilities, type SignatureEnvelope } from "./signing";
 
@@ -1618,26 +1599,6 @@ const EditorConfigSchema = z.object({
   editor: EditorTypeSchema,
   customCommand: z.string().optional(),
 });
-
-const StatsTabVariantSchema = z.enum(["control", "stats"]);
-const StatsTabOverrideSchema = z.enum(["default", "on", "off"]);
-const StatsTabStateSchema = z.object({
-  enabled: z.boolean(),
-  variant: StatsTabVariantSchema,
-  override: StatsTabOverrideSchema,
-});
-
-// Feature gates (PostHog-backed)
-export const features = {
-  getStatsTabState: {
-    input: z.void(),
-    output: StatsTabStateSchema,
-  },
-  setStatsTabOverride: {
-    input: z.object({ override: StatsTabOverrideSchema }),
-    output: StatsTabStateSchema,
-  },
-};
 
 // General
 export const general = {

@@ -17,12 +17,6 @@ describe("filterSuggestionsForMobile", () => {
         replacement: "/model opus",
       },
       {
-        id: "command:telemetry:on",
-        display: "/telemetry",
-        description: "Enable telemetry",
-        replacement: "/telemetry on",
-      },
-      {
         id: "command:vim",
         display: "/vim",
         description: "Toggle Vim mode",

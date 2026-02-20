@@ -7,7 +7,6 @@
  * - Providers (API key configuration)
  * - Models (custom model management)
  * - Modes (per-mode default model / reasoning)
- * - Experiments
  *
  * NOTE: Projects/MCP stories live in App.mcp.stories.tsx
  *
@@ -20,11 +19,6 @@ import { createWorkspace, groupWorkspacesByProject } from "./mockFactory";
 import { selectWorkspace } from "./storyHelpers";
 import { createMockORPCClient } from "@/browser/stories/mocks/orpc";
 import { within, userEvent, waitFor } from "@storybook/test";
-import {
-  getExperimentKey,
-  EXPERIMENT_IDS,
-  type ExperimentId,
-} from "@/common/constants/experiments";
 import type { AgentAiDefaults } from "@/common/types/agentAiDefaults";
 import type { TaskSettings } from "@/common/types/tasks";
 import type { ServerAuthSession } from "@/common/orpc/types";
@@ -57,20 +51,10 @@ function setupSettingsStory(options: {
   taskSettings?: Partial<TaskSettings>;
   /** Sessions shown in Settings → Server Access. */
   serverAuthSessions?: ServerAuthSession[];
-  /** Pre-set experiment states in localStorage before render */
-  experiments?: Partial<Record<string, boolean>>;
 }): APIClient {
   const workspaces = [createWorkspace({ id: "ws-1", name: "main", projectName: "my-app" })];
 
   selectWorkspace(workspaces[0]);
-
-  // Pre-set experiment states if provided
-  if (options.experiments) {
-    for (const [experimentId, enabled] of Object.entries(options.experiments)) {
-      const key = getExperimentKey(experimentId as ExperimentId);
-      window.localStorage.setItem(key, JSON.stringify(enabled));
-    }
-  }
 
   return createMockORPCClient({
     projects: groupWorkspacesByProject(workspaces),
@@ -100,7 +84,7 @@ async function openSettingsToSection(canvasElement: HTMLElement, section?: strin
 
   // Navigate to specific section if requested.
   if (section && section !== "general") {
-    // Capitalize first letter to match nav labels (e.g., "experiments" -> "Experiments").
+    // Capitalize first letter to match nav labels.
     const sectionLabel = section.charAt(0).toUpperCase() + section.slice(1);
     const sectionButtons = await canvas.findAllByRole("button", {
       name: new RegExp(sectionLabel, "i"),
@@ -454,13 +438,13 @@ export const ModelsConfigured: AppStory = {
   },
 };
 
-/** System 1 section - experiment gated */
+/** System 1 section */
 export const System1: AppStory = {
   render: () => (
     <AppWithMocks
       setup={() =>
         setupSettingsStory({
-          experiments: { [EXPERIMENT_IDS.SYSTEM_1]: true },
+
           taskSettings: {
             bashOutputCompactionMinLines: 12,
             bashOutputCompactionMinTotalBytes: 8192,
@@ -545,39 +529,6 @@ export const ServerAccess: AppStory = {
     await settingsCanvas.findByText(/Firefox on Android/i);
     await settingsCanvas.findByRole("button", { name: /^Refresh$/i });
     await settingsCanvas.findByRole("button", { name: /Revoke other sessions/i });
-  },
-};
-
-/** Experiments section - shows available experiments */
-export const Experiments: AppStory = {
-  render: () => <AppWithMocks setup={() => setupSettingsStory({})} />,
-  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-    await openSettingsToSection(canvasElement, "experiments");
-  },
-};
-
-/** Experiments section - shows experiment in ON state (pre-enabled via localStorage) */
-export const ExperimentsToggleOn: AppStory = {
-  render: () => (
-    <AppWithMocks
-      setup={() =>
-        setupSettingsStory({
-          experiments: { [EXPERIMENT_IDS.SYSTEM_1]: true },
-        })
-      }
-    />
-  ),
-  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-    await openSettingsToSection(canvasElement, "experiments");
-  },
-};
-
-/** Experiments section - shows experiment in OFF state (default) */
-export const ExperimentsToggleOff: AppStory = {
-  render: () => <AppWithMocks setup={() => setupSettingsStory({})} />,
-  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-    await openSettingsToSection(canvasElement, "experiments");
-    // Default state is OFF - no clicks needed
   },
 };
 

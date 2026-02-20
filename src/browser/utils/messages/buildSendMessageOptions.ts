@@ -4,19 +4,11 @@ import type { MuxProviderOptions } from "@/common/types/providerOptions";
 import { coerceThinkingLevel } from "@/common/types/thinking";
 import { migrateGatewayModel } from "@/browser/hooks/useGatewayModels";
 
-export interface ExperimentValues {
-  programmaticToolCalling: boolean | undefined;
-  programmaticToolCallingExclusive: boolean | undefined;
-  system1: boolean | undefined;
-  execSubagentHardRestart: boolean | undefined;
-}
-
 export interface SendMessageOptionsInput {
   model: string;
   thinkingLevel: ThinkingLevel;
   agentId: string;
   providerOptions: MuxProviderOptions;
-  experiments: ExperimentValues;
   system1Model?: string;
   system1ThinkingLevel?: ThinkingLevel;
   disableWorkspaceAgents?: boolean;
@@ -57,7 +49,6 @@ export function buildSendMessageOptions(input: SendMessageOptionsInput): SendMes
     ...(system1ThinkingLevel && { system1ThinkingLevel }),
     agentId: input.agentId,
     providerOptions: input.providerOptions,
-    experiments: { ...input.experiments },
     disableWorkspaceAgents: input.disableWorkspaceAgents ? true : undefined,
   };
 }

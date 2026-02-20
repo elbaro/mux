@@ -197,7 +197,6 @@ def build_rows(job_folder: Path) -> list[dict]:
     if dataset is None:
         dataset = job_config.get("dataset")
 
-    experiments = os.environ.get("MUX_EXPERIMENTS")
 
     # Raw JSON for future-proofing
     run_result_json = json.dumps(job_result) if job_result else None
@@ -249,7 +248,7 @@ def build_rows(job_folder: Path) -> list[dict]:
             "thinking_level": thinking_level,
             "mode": mode,
             "dataset": dataset,
-            "experiments": experiments,
+
             "run_started_at": None,  # Not available in Harbor format
             "run_completed_at": None,
             "n_resolved": None,  # Will be set after counting all trials

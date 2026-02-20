@@ -1,6 +1,6 @@
 /**
  * Governor Section - Enrollment UI for Mux Governor (enterprise policy service).
- * Gated behind the MUX_GOVERNOR experiment flag.
+ * Always available.
  */
 
 import { useEffect, useRef, useState } from "react";

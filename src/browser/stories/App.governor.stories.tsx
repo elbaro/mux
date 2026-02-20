@@ -16,7 +16,6 @@ import { selectWorkspace } from "./storyHelpers";
 import { createMockORPCClient } from "@/browser/stories/mocks/orpc";
 import { within, userEvent } from "@storybook/test";
 import type { PolicyGetResponse, PolicySource, EffectivePolicy } from "@/common/orpc/types";
-import { getExperimentKey, EXPERIMENT_IDS } from "@/common/constants/experiments";
 
 export default {
   ...appMeta,
@@ -40,10 +39,6 @@ function setupGovernorStory(options: GovernorStoryOptions = {}): APIClient {
   const workspaces = [createWorkspace({ id: "ws-1", name: "main", projectName: "my-app" })];
 
   selectWorkspace(workspaces[0]);
-
-  // Enable the Governor experiment so the section appears in Settings
-  const experimentKey = getExperimentKey(EXPERIMENT_IDS.MUX_GOVERNOR);
-  window.localStorage.setItem(experimentKey, JSON.stringify(true));
 
   const {
     muxGovernorUrl = null,

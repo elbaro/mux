@@ -348,9 +348,6 @@ describe("AgentSession execSubagentHardRestart", () => {
     const options: SendMessageOptions = {
       model: "openai:gpt-4o",
       agentId: "exec",
-      experiments: {
-        execSubagentHardRestart: true,
-      },
     } as unknown as SendMessageOptions;
 
     await (
@@ -564,9 +561,6 @@ describe("AgentSession execSubagentHardRestart", () => {
     const options: SendMessageOptions = {
       model: "openai:gpt-4o",
       agentId: customAgentId,
-      experiments: {
-        execSubagentHardRestart: true,
-      },
     } as unknown as SendMessageOptions;
 
     await (
@@ -675,9 +669,6 @@ describe("AgentSession execSubagentHardRestart", () => {
     const options: SendMessageOptions = {
       model: "openai:gpt-4o",
       agentId: "exec",
-      experiments: {
-        execSubagentHardRestart: true,
-      },
     } as unknown as SendMessageOptions;
 
     await (

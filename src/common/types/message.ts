@@ -44,11 +44,7 @@ export interface CompactionFollowUpInput extends UserMessageContent {
  */
 type PreservedSendOptions = Pick<
   SendMessageOptions,
-  | "thinkingLevel"
-  | "additionalSystemInstructions"
-  | "providerOptions"
-  | "experiments"
-  | "disableWorkspaceAgents"
+  "thinkingLevel" | "additionalSystemInstructions" | "providerOptions" | "disableWorkspaceAgents"
 >;
 
 /**
@@ -60,7 +56,6 @@ export function pickPreservedSendOptions(options: SendMessageOptions): Preserved
     thinkingLevel: options.thinkingLevel,
     additionalSystemInstructions: options.additionalSystemInstructions,
     providerOptions: options.providerOptions,
-    experiments: options.experiments,
     disableWorkspaceAgents: options.disableWorkspaceAgents,
   };
 }

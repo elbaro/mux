@@ -7,7 +7,6 @@ import { linkAbortSignal } from "@/node/utils/abort";
 import type { Result } from "@/common/types/result";
 import { Ok, Err } from "@/common/types/result";
 import type { WorkspaceMetadata } from "@/common/types/workspace";
-import type { SendMessageOptions } from "@/common/orpc/types";
 
 import type { DebugLlmRequestSnapshot } from "@/common/types/debugLlmRequest";
 
@@ -41,10 +40,8 @@ import { createAssistantMessageId } from "./utils/messageIds";
 import type { SessionUsageService } from "./sessionUsageService";
 import { sumUsageHistory, getTotalCost } from "@/common/utils/tokens/usageAggregator";
 import { readToolInstructions } from "./systemMessage";
-import type { TelemetryService } from "@/node/services/telemetryService";
-
 import type { WorkspaceMCPOverrides } from "@/common/types/mcp";
-import type { MCPServerManager, MCPWorkspaceStats } from "@/node/services/mcpServerManager";
+import type { MCPServerManager } from "@/node/services/mcpServerManager";
 import { WorkspaceMcpOverridesService } from "./workspaceMcpOverridesService";
 import type { TaskService } from "@/node/services/taskService";
 import { buildProviderOptions, buildRequestHeaders } from "@/common/utils/ai/providerOptions";
@@ -54,12 +51,10 @@ import { THINKING_LEVEL_OFF, type ThinkingLevel } from "@/common/types/thinking"
 
 import type { StreamAbortEvent, StreamAbortReason, StreamEndEvent } from "@/common/types/stream";
 import type { ToolPolicy } from "@/common/utils/tools/toolPolicy";
-import type { PTCEventWithParent } from "@/node/services/tools/code_execution";
 import { MockAiStreamPlayer } from "./mock/mockAiStreamPlayer";
 import { ProviderModelFactory, modelCostsIncluded } from "./providerModelFactory";
 import { AgentSdkService } from "./agentSdkService";
 import { resolveProviderCredentials } from "@/node/utils/providerRequirements";
-import { wrapToolsWithSystem1 } from "./system1ToolWrapper";
 import { prepareMessagesForProvider } from "./messagePipeline";
 import { resolveAgentForStream } from "./agentResolution";
 import { buildPlanInstructions, buildStreamSystemContext } from "./streamContextBuilder";
@@ -68,7 +63,7 @@ import {
   simulateToolPolicyNoop,
   type SimulationContext,
 } from "./streamSimulation";
-import { applyToolPolicyAndExperiments, captureMcpToolTelemetry } from "./toolAssembly";
+import { applyToolPolicyToTools } from "./toolAssembly";
 import { getErrorMessage } from "@/common/utils/errors";
 
 // ---------------------------------------------------------------------------
@@ -90,9 +85,6 @@ export interface StreamMessageOptions {
   recordFileState?: (filePath: string, state: FileState) => void;
   changedFileAttachments?: EditedFileAttachment[];
   postCompactionAttachments?: PostCompactionAttachment[] | null;
-  experiments?: SendMessageOptions["experiments"];
-  system1Model?: string;
-  system1ThinkingLevel?: ThinkingLevel;
   disableWorkspaceAgents?: boolean;
   hasQueuedMessage?: () => boolean;
   openaiTruncationModeOverride?: "auto" | "disabled";
@@ -116,7 +108,6 @@ export class AIService extends EventEmitter {
   private readonly workspaceMcpOverridesService: WorkspaceMcpOverridesService;
   private mcpServerManager?: MCPServerManager;
   private readonly policyService?: PolicyService;
-  private readonly telemetryService?: TelemetryService;
   private readonly initStateManager: InitStateManager;
   private mockModeEnabled: boolean;
   private mockAiStreamPlayer?: MockAiStreamPlayer;
@@ -145,8 +136,7 @@ export class AIService extends EventEmitter {
     backgroundProcessManager?: BackgroundProcessManager,
     sessionUsageService?: SessionUsageService,
     workspaceMcpOverridesService?: WorkspaceMcpOverridesService,
-    policyService?: PolicyService,
-    telemetryService?: TelemetryService
+    policyService?: PolicyService
   ) {
     super();
     // Increase max listeners to accommodate multiple concurrent workspace listeners
@@ -160,7 +150,6 @@ export class AIService extends EventEmitter {
     this.backgroundProcessManager = backgroundProcessManager;
     this.sessionUsageService = sessionUsageService;
     this.policyService = policyService;
-    this.telemetryService = telemetryService;
     this.streamManager = new StreamManager(historyService, sessionUsageService);
     this.providerModelFactory = new ProviderModelFactory(config, providerService, policyService);
     this.agentSdkService = new AgentSdkService();
@@ -357,9 +346,6 @@ export class AIService extends EventEmitter {
       recordFileState,
       changedFileAttachments,
       postCompactionAttachments,
-      experiments,
-      system1Model,
-      system1ThinkingLevel,
       disableWorkspaceAgents,
       hasQueuedMessage,
       openaiTruncationModeOverride,
@@ -467,7 +453,6 @@ export class AIService extends EventEmitter {
         return Err(modelResult.error);
       }
       const {
-        effectiveModelString,
         canonicalModelString,
         canonicalProviderName,
         routedThroughGateway,
@@ -718,11 +703,8 @@ export class AIService extends EventEmitter {
       const streamToken = this.streamManager.generateStreamToken();
 
       let mcpTools: Record<string, Tool> | undefined;
-      let mcpStats: MCPWorkspaceStats | undefined;
-      let mcpSetupDurationMs = 0;
 
       if (this.mcpServerManager && workspaceId !== MUX_HELP_CHAT_WORKSPACE_ID) {
-        const start = Date.now();
         try {
           const result = await this.mcpServerManager.getToolsForWorkspace({
             workspaceId,
@@ -734,11 +716,8 @@ export class AIService extends EventEmitter {
           });
 
           mcpTools = result.tools;
-          mcpStats = result.stats;
         } catch (error) {
           workspaceLog.error("Failed to start MCP servers", { error });
-        } finally {
-          mcpSetupDurationMs = Date.now() - start;
         }
       }
 
@@ -801,8 +780,6 @@ export class AIService extends EventEmitter {
           // External edit detection callback
           recordFileState,
           taskService: this.taskService,
-          // PTC experiments for inheritance to subagents
-          experiments,
           // Dynamic context for tool descriptions (moved from system prompt for better model attention)
           availableSubagents: agentDefinitions,
           availableSkills,
@@ -813,36 +790,21 @@ export class AIService extends EventEmitter {
         mcpTools
       );
 
-      // Create assistant message ID early so the PTC callback closure captures it.
+      // Create assistant message ID early so callback closures capture it.
       // The placeholder is appended to history below (after abort check).
       const assistantMessageId = createAssistantMessageId();
 
-      // Apply tool policy and PTC experiments (lazy-loads PTC dependencies only when needed).
-      const tools = await applyToolPolicyAndExperiments({
+      const tools = await applyToolPolicyToTools({
         allTools,
         extraTools: this.extraTools,
         effectiveToolPolicy,
-        experiments,
-        // Forward nested PTC tool events to the stream (tool-call-start/end only,
-        // not console events which appear in final result only).
-        emitNestedToolEvent: (event: PTCEventWithParent) => {
-          if (event.type === "tool-call-start" || event.type === "tool-call-end") {
-            this.streamManager.emitNestedToolEvent(workspaceId, assistantMessageId, event);
-          }
-        },
       });
 
-      captureMcpToolTelemetry({
-        telemetryService: this.telemetryService,
-        mcpStats,
-        mcpTools,
-        tools,
-        mcpSetupDurationMs,
+      log.info("AIService.streamMessage: tool configuration", {
         workspaceId,
-        modelString,
-        effectiveAgentId,
-        metadata,
-        effectiveToolPolicy,
+        model: modelString,
+        toolNames: Object.keys(tools),
+        hasToolPolicy: Boolean(effectiveToolPolicy),
       });
 
       if (combinedAbortSignal.aborted) {
@@ -975,28 +937,7 @@ export class AIService extends EventEmitter {
         const errMsg = getErrorMessage(error);
         workspaceLog.warn("Failed to capture debug LLM request snapshot", { error: errMsg });
       }
-      const toolsForStream =
-        experiments?.system1 === true
-          ? wrapToolsWithSystem1({
-              tools,
-              system1Model,
-              system1ThinkingLevel,
-              modelString,
-              effectiveModelString,
-              primaryModel: modelResult.data.model,
-              muxProviderOptions: effectiveMuxProviderOptions,
-              workspaceId,
-              effectiveMode,
-              planFilePath,
-              taskSettings,
-              runtimeTempDir,
-              runtime,
-              agentDiscoveryPath,
-              createModel: (ms, o) => this.createModel(ms, o),
-              emitBashOutput: (ev) => this.emit("bash-output", ev),
-              sessionUsageService: this.sessionUsageService,
-            })
-          : tools;
+      const toolsForStream = tools;
 
       const streamResult = await this.streamManager.startStream(
         workspaceId,

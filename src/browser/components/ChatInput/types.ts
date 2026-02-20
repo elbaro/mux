@@ -1,5 +1,4 @@
 import type { FrontendWorkspaceMetadata } from "@/common/types/workspace";
-import type { TelemetryRuntimeType } from "@/common/telemetry/payload";
 import type { AutoCompactionCheckResult } from "@/browser/utils/compaction/autoCompactionCheck";
 import type { Review } from "@/common/types/review";
 import type { EditingMessageState, PendingUserMessage } from "@/browser/utils/chatEditing";
@@ -22,8 +21,6 @@ export interface WorkspaceCreatedOptions {
 export interface ChatInputWorkspaceVariant {
   variant: "workspace";
   workspaceId: string;
-  /** Runtime type for the workspace (for telemetry) - no sensitive details like SSH host */
-  runtimeType?: TelemetryRuntimeType;
   onMessageSent?: () => void;
   onTruncateHistory: (percentage?: number) => Promise<void>;
   onModelChange?: (model: string) => void;

@@ -998,7 +998,6 @@ describe("TaskService", () => {
       model: "openai:gpt-5.3-codex",
       agentId: "explore",
       thinkingLevel: "xhigh",
-      experiments: undefined,
     });
 
     const postCfg = config.loadConfigOrDefault();
@@ -1062,7 +1061,6 @@ describe("TaskService", () => {
         model: "openai:gpt-5.3-codex",
         agentId: "explore",
         thinkingLevel: "xhigh",
-        experiments: undefined,
       }
     );
 
@@ -1129,7 +1127,6 @@ describe("TaskService", () => {
         model: "anthropic:claude-haiku-4-5",
         agentId: "explore",
         thinkingLevel: "off",
-        experiments: undefined,
       }
     );
 
@@ -1205,7 +1202,6 @@ describe("TaskService", () => {
       model: "openai:gpt-5.3-codex",
       agentId: "custom",
       thinkingLevel: "xhigh",
-      experiments: undefined,
     });
 
     const postCfg = config.loadConfigOrDefault();
@@ -1280,7 +1276,6 @@ describe("TaskService", () => {
       model: "openai:gpt-5.3-codex",
       agentId: "custom",
       thinkingLevel: "xhigh",
-      experiments: undefined,
     });
   }, 20_000);
   test("auto-resumes a parent workspace until background tasks finish", async () => {

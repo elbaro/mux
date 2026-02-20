@@ -70,7 +70,6 @@ import { resolveAgentInheritanceChain } from "@/node/services/agentDefinitions/r
 import { MessageQueue } from "./messageQueue";
 import type { StreamEndEvent, StreamStartEvent } from "@/common/types/stream";
 import { CompactionHandler } from "./compactionHandler";
-import type { TelemetryService } from "./telemetryService";
 import type { BackgroundProcessManager } from "./backgroundProcessManager";
 
 import { AttachmentService } from "./attachmentService";
@@ -168,7 +167,6 @@ interface AgentSessionOptions {
   historyService: HistoryService;
   aiService: AIService;
   initStateManager: InitStateManager;
-  telemetryService?: TelemetryService;
   backgroundProcessManager: BackgroundProcessManager;
   /** When true, skip terminating background processes on dispose/compaction (for bench/CI) */
   keepBackgroundProcesses?: boolean;
@@ -239,7 +237,7 @@ export class AgentSession {
    */
   private ackPendingPostCompactionStateOnStreamEnd = false;
   /**
-   * Cache the last-known experiment state so we don't spam metadata refresh
+   * Cache the last-known state so we don't spam metadata refresh
    * when post-compaction context is disabled.
    */
   /** Track compaction requests that already retried with truncation. */
@@ -284,7 +282,6 @@ export class AgentSession {
       historyService,
       aiService,
       initStateManager,
-      telemetryService,
       backgroundProcessManager,
       keepBackgroundProcesses,
       onCompactionComplete,
@@ -309,7 +306,6 @@ export class AgentSession {
       workspaceId: this.workspaceId,
       historyService: this.historyService,
       sessionDir: this.config.getSessionDir(this.workspaceId),
-      telemetryService,
       emitter: this.emitter,
       onCompactionComplete,
     });
@@ -1401,9 +1397,6 @@ export class AgentSession {
       changedFileAttachments:
         changedFileAttachments.length > 0 ? changedFileAttachments : undefined,
       postCompactionAttachments,
-      experiments: options?.experiments,
-      system1Model: options?.system1Model,
-      system1ThinkingLevel: options?.system1ThinkingLevel,
       disableWorkspaceAgents: options?.disableWorkspaceAgents,
       hasQueuedMessage: () => !this.messageQueue.isEmpty(),
       openaiTruncationModeOverride,
@@ -1703,11 +1696,9 @@ export class AgentSession {
       return false;
     }
 
-    // Only enabled via experiment (and only when we still have a valid retry context).
     const context = this.activeStreamContext;
     const requestId = this.activeStreamUserMessageId;
-    const experimentEnabled = context?.options?.experiments?.execSubagentHardRestart === true;
-    if (!experimentEnabled || !context || !requestId) {
+    if (!context || !requestId) {
       return false;
     }
 
@@ -1958,9 +1949,6 @@ export class AgentSession {
           model: context.modelString,
           agentId: WORKSPACE_DEFAULTS.agentId,
           additionalSystemInstructions: mergedAdditionalSystemInstructions,
-          experiments: {
-            execSubagentHardRestart: true,
-          },
         };
 
     this.setTurnPhase(TurnPhase.PREPARING);
@@ -2725,7 +2713,6 @@ export class AgentSession {
       ...(currentOptions?.providerOptions != null && {
         providerOptions: currentOptions.providerOptions,
       }),
-      ...(currentOptions?.experiments != null && { experiments: currentOptions.experiments }),
       ...(currentOptions?.maxOutputTokens != null && {
         maxOutputTokens: currentOptions.maxOutputTokens,
       }),

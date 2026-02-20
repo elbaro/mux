@@ -5,7 +5,6 @@
  * - name: Display name for the tab
  * - contentClassName: CSS classes for the tab panel container
  * - keepAlive: Whether the tab should remain mounted while hidden
- * - featureFlag: Optional feature flag key required to show the tab
  *
  * This keeps per-tab decisions out of RightSidebar.tsx and avoids switch statements.
  */
@@ -70,11 +69,6 @@ export interface TabConfig {
    */
   keepAlive?: boolean;
 
-  /**
-   * Whether this tab requires a feature flag to be shown.
-   * Returns the feature flag key, or undefined if always available.
-   */
-  featureFlag?: string;
 }
 
 /** Static tab configurations (non-terminal tabs) */
@@ -95,7 +89,6 @@ export const TAB_CONFIGS: Record<"costs" | "review" | "explorer" | "stats" | "ou
     stats: {
       name: "Stats",
       contentClassName: "overflow-y-auto p-[15px]",
-      featureFlag: "statsTab",
     },
     output: {
       name: "Output",

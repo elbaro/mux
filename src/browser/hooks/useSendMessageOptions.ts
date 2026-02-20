@@ -16,8 +16,6 @@ import {
 } from "@/common/constants/storage";
 import type { SendMessageOptions } from "@/common/orpc/types";
 import { useProviderOptions } from "./useProviderOptions";
-import { useExperimentOverrideValue } from "./useExperiments";
-import { EXPERIMENT_IDS } from "@/common/constants/experiments";
 
 /**
  * Extended send options that includes both the canonical model used for backend routing
@@ -53,19 +51,6 @@ export function useSendMessageOptions(workspaceId: string): SendMessageOptionsWi
     listener: true,
   });
 
-  // Subscribe to local override state so toggles apply immediately.
-  // If undefined, the backend will apply the PostHog assignment.
-  const programmaticToolCalling = useExperimentOverrideValue(
-    EXPERIMENT_IDS.PROGRAMMATIC_TOOL_CALLING
-  );
-  const programmaticToolCallingExclusive = useExperimentOverrideValue(
-    EXPERIMENT_IDS.PROGRAMMATIC_TOOL_CALLING_EXCLUSIVE
-  );
-  const system1 = useExperimentOverrideValue(EXPERIMENT_IDS.SYSTEM_1);
-  const execSubagentHardRestart = useExperimentOverrideValue(
-    EXPERIMENT_IDS.EXEC_SUBAGENT_HARD_RESTART
-  );
-
   const [preferredSystem1Model] = usePersistedState<unknown>(PREFERRED_SYSTEM_1_MODEL_KEY, "", {
     listener: true,
   });
@@ -86,12 +71,6 @@ export function useSendMessageOptions(workspaceId: string): SendMessageOptionsWi
     thinkingLevel,
     model: baseModel,
     providerOptions,
-    experiments: {
-      programmaticToolCalling,
-      programmaticToolCallingExclusive,
-      system1,
-      execSubagentHardRestart,
-    },
     system1Model,
     system1ThinkingLevel,
     disableWorkspaceAgents,

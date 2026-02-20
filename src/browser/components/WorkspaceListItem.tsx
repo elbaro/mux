@@ -21,7 +21,6 @@ import { WorkspaceStatusIndicator } from "./WorkspaceStatusIndicator";
 import { Shimmer } from "./ai-elements/shimmer";
 import { ArchiveIcon } from "./icons/ArchiveIcon";
 import { WORKSPACE_DRAG_TYPE, type WorkspaceDragItem } from "./WorkspaceSectionDropZone";
-import { useLinkSharingEnabled } from "@/browser/contexts/TelemetryEnabledContext";
 import { formatKeybind, KEYBINDS } from "@/browser/utils/ui/keybinds";
 import { ShareTranscriptDialog } from "./ShareTranscriptDialog";
 import { WorkspaceActionsMenuContent } from "./WorkspaceActionsMenuContent";
@@ -287,7 +286,8 @@ function RegularWorkspaceListItemInner(props: WorkspaceListItemProps) {
   const displayTitle = metadata.title ?? metadata.name;
   const isEditing = editingWorkspaceId === workspaceId;
 
-  const linkSharingEnabled = useLinkSharingEnabled();
+  // Link sharing is always enabled.
+  const linkSharingEnabled = true;
   const [shareTranscriptOpen, setShareTranscriptOpen] = useState(false);
   const [isOverflowMenuPlaced, setIsOverflowMenuPlaced] = useState(false);
 

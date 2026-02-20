@@ -24,11 +24,6 @@
 #   Branches reduce reproducibility - builds should fail fast with clear errors
 #   if dependencies are missing, not silently fall back to different behavior.
 #
-# Telemetry in Development:
-#   Telemetry is enabled by default in dev mode (same as production).
-#   It is automatically disabled in CI, test environments, and automation contexts.
-#   To manually disable telemetry, set MUX_DISABLE_TELEMETRY=1.
-
 # Use PATH-resolved bash for portability across different systems.
 # - Windows: /usr/bin/bash doesn't exist in Chocolatey's make environment or GitHub Actions
 # - NixOS: /bin/bash doesn't exist, bash is in /nix/store/...
@@ -329,7 +324,6 @@ check-deadcode: node_modules/.installed ## Check for potential dead code (manual
 		| grep -v "used in module" \
 		| grep -v "src/App.tsx.*default" \
 		| grep -v "src/types/" \
-		| grep -v "telemetry/index.ts" \
 		|| echo "✓ No obvious dead code found"
 
 ## Testing

@@ -19,8 +19,6 @@ export type SectionConfig = z.infer<typeof SectionConfigSchema>;
 
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
-export type FeatureFlagOverride = "default" | "on" | "off";
-
 export interface ProjectsConfig {
   projects: Map<string, ProjectConfig>;
   /**
@@ -66,8 +64,6 @@ export interface ProjectsConfig {
   defaultProjectDir?: string;
   /** IDs of splash screens that have been viewed */
   viewedSplashScreens?: string[];
-  /** Cross-client feature flag overrides (shared via ~/.mux/config.json). */
-  featureFlagOverrides?: Record<string, FeatureFlagOverride>;
   /** Global task settings (agent sub-workspaces, queue limits, nesting depth) */
   taskSettings?: TaskSettings;
   /** UI layout presets + hotkeys (shared via ~/.mux/config.json). */

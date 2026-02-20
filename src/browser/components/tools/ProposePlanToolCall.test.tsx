@@ -102,10 +102,6 @@ void mock.module("@/browser/contexts/WorkspaceContext", () => ({
   }),
 }));
 
-void mock.module("@/browser/contexts/TelemetryEnabledContext", () => ({
-  useLinkSharingEnabled: () => true,
-}));
-
 const TEST_AGENTS: AgentDefinitionDescriptor[] = [
   {
     id: "exec",

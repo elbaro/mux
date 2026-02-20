@@ -1070,7 +1070,7 @@ export const TOOL_DEFINITIONS = {
   code_execution: {
     description:
       "Execute JavaScript code in a sandboxed environment with access to Mux tools. " +
-      "Available for multi-tool workflows when PTC experiment is enabled.",
+      "Available for multi-tool workflows when PTC is enabled.",
     schema: z.object({
       code: z.string().min(1).describe("JavaScript code to execute in the PTC sandbox"),
     }),

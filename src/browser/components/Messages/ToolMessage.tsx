@@ -53,7 +53,7 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
       <ToolComponent
         // Base props (all tools)
         args={args}
-        result={result ?? null}
+        result={result}
         status={status}
         toolName={toolName}
         // Identity props (used by bash for live output, ask_user_question for caching)

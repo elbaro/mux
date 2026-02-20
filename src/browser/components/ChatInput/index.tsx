@@ -105,8 +105,6 @@ import {
 import type { Review } from "@/common/types/review";
 import { getModelCapabilities } from "@/common/utils/ai/modelCapabilities";
 import { KNOWN_MODELS, MODEL_ABBREVIATION_EXAMPLES } from "@/common/constants/knownModels";
-import { useTelemetry } from "@/browser/hooks/useTelemetry";
-import { trackCommandUsed } from "@/common/telemetry";
 import type { FilePart, SendMessageOptions } from "@/common/orpc/types";
 
 import { CreationCenterContent } from "./CreationCenterContent";
@@ -202,9 +200,6 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
       mobileTouchMediaQuery.removeEventListener("change", handleMobileTouchChange);
     };
   }, []);
-  // runtimeType for telemetry - defaults to "worktree" if not provided
-  const runtimeType = variant === "workspace" ? (props.runtimeType ?? "worktree") : "worktree";
-
   // Callback for model changes (both variants support this)
   const onModelChange = props.onModelChange;
 
@@ -455,7 +450,6 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
   );
   const atMentionListId = useId();
   const commandListId = useId();
-  const telemetry = useTelemetry();
   const [vimEnabled, setVimEnabled] = usePersistedState<boolean>(VIM_ENABLED_KEY, false, {
     listener: true,
   });
@@ -2084,20 +2078,6 @@ const ChatInputInner: React.FC<ChatInputProps> = (props) => {
           setDraft(preSendDraft);
           setDraftReviews(preSendReviews);
         } else {
-          // Track telemetry for successful message send
-          telemetry.messageSent(
-            props.workspaceId,
-            effectiveModel,
-            sendMessageOptions.agentId ?? agentId ?? "exec",
-            finalMessageText.length,
-            runtimeType,
-            sendMessageOptions.thinkingLevel ?? "off"
-          );
-
-          if (modelOneShot) {
-            trackCommandUsed("model");
-          }
-
           // Mark workspace as read after sending a message.
           // This prevents the unread indicator from showing when the user
           // just interacted with the workspace (their own message bumps recencyTimestamp,

@@ -525,8 +525,6 @@ export default defineConfig([
       // This file is only used by Node.js code (cli/debug) but lives in common/
       // TODO: Consider moving to node/utils/
       "src/common/utils/providers/ensureProvidersConfig.ts",
-      // Telemetry uses defensive process checks for test environments
-      "src/common/telemetry/**",
     ],
     rules: {
       "no-restricted-globals": [

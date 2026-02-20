@@ -2,18 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { installBrowserLogCapture } from "@/browser/utils/browserLog";
 import { AppLoader } from "@/browser/components/AppLoader";
-import { initTelemetry, trackAppStarted } from "@/common/telemetry";
 import { initTitlebarInsets } from "@/browser/hooks/useDesktopTitlebar";
 
-// Initialize telemetry on app startup
 try {
   installBrowserLogCapture();
 } catch {
   // Silent failure — never crash the app for logging capture
 }
-
-initTelemetry();
-trackAppStarted();
 
 // Initialize titlebar CSS custom properties (platform-specific insets)
 initTitlebarInsets();

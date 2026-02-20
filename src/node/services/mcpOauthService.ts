@@ -7,11 +7,9 @@ import { auth, type OAuthClientProvider } from "@ai-sdk/mcp";
 import type { Config } from "@/node/config";
 import type { MCPConfigService } from "@/node/services/mcpConfigService";
 import type { WindowService } from "@/node/services/windowService";
-import type { TelemetryService } from "@/node/services/telemetryService";
 import { log } from "@/node/services/log";
 import type { Result } from "@/common/types/result";
 import { Err, Ok } from "@/common/types/result";
-import { roundToBase2 } from "@/common/telemetry/utils";
 import type {
   MCPOAuthAuthStatus,
   MCPOAuthClientInformation,
@@ -406,15 +404,12 @@ export class McpOauthService {
 
   private readonly desktopFlows = new Map<string, DesktopFlow>();
   private readonly serverFlows = new Map<string, ServerFlow>();
-  private readonly telemetryService?: TelemetryService;
 
   constructor(
     private readonly config: Config,
     private readonly mcpConfigService: MCPConfigService,
-    private readonly windowService?: WindowService,
-    telemetryService?: TelemetryService
+    private readonly windowService?: WindowService
   ) {
-    this.telemetryService = telemetryService;
     this.storeFilePath = path.join(config.rootDir, STORE_FILE_NAME);
   }
 
@@ -695,15 +690,6 @@ export class McpOauthService {
 
     this.desktopFlows.set(flowId, flow);
 
-    this.captureTelemetry({
-      event: "mcp_oauth_flow_started",
-      properties: {
-        transport: flow.transport,
-        has_scope_hint: Boolean(flow.scope),
-        has_resource_metadata_hint: Boolean(flow.resourceMetadataUrl),
-      },
-    });
-
     try {
       // Force a user-interactive flow by not exposing existing tokens.
       const provider = this.createFlowProvider(flow);
@@ -835,15 +821,6 @@ export class McpOauthService {
 
     this.serverFlows.set(flowId, flow);
 
-    this.captureTelemetry({
-      event: "mcp_oauth_flow_started",
-      properties: {
-        transport: flow.transport,
-        has_scope_hint: Boolean(flow.scope),
-        has_resource_metadata_hint: Boolean(flow.resourceMetadataUrl),
-      },
-    });
-
     try {
       // Force a user-interactive flow by not exposing existing tokens.
       const provider = this.createFlowProvider(flow);
@@ -943,39 +920,6 @@ export class McpOauthService {
     await this.finishServerFlow(state, result);
 
     return result;
-  }
-
-  private captureTelemetry(payload: Parameters<TelemetryService["capture"]>[0]): void {
-    try {
-      this.telemetryService?.capture(payload);
-    } catch (error) {
-      // Telemetry must never block or crash OAuth flows.
-      log.debug("[MCP OAuth] Failed to capture telemetry", { error });
-    }
-  }
-
-  private getOAuthFlowErrorCategory(
-    error: string
-  ): "timeout" | "cancelled" | "state_mismatch" | "provider_error" | "unknown" {
-    const lower = error.toLowerCase();
-
-    if (lower.includes("timed out")) {
-      return "timeout";
-    }
-
-    if (lower.includes("cancelled")) {
-      return "cancelled";
-    }
-
-    if (lower.includes("invalid oauth state")) {
-      return "state_mismatch";
-    }
-
-    if (lower.includes("oauth")) {
-      return "provider_error";
-    }
-
-    return "unknown";
   }
 
   private createFlowProvider(flow: OAuthFlowBase): OAuthClientProvider {
@@ -1183,35 +1127,6 @@ export class McpOauthService {
     flow.settled = true;
     clearTimeout(flow.timeout);
 
-    const durationMs = Math.max(0, Date.now() - flow.startedAtMs);
-    const durationMsB2 = roundToBase2(durationMs);
-    const hasScopeHint = Boolean(flow.scope);
-    const hasResourceMetadataHint = Boolean(flow.resourceMetadataUrl);
-
-    if (result.success) {
-      this.captureTelemetry({
-        event: "mcp_oauth_flow_completed",
-        properties: {
-          transport: flow.transport,
-          duration_ms_b2: durationMsB2,
-          has_scope_hint: hasScopeHint,
-          has_resource_metadata_hint: hasResourceMetadataHint,
-        },
-      });
-    } else {
-      const errorCategory = this.getOAuthFlowErrorCategory(result.error);
-      this.captureTelemetry({
-        event: "mcp_oauth_flow_failed",
-        properties: {
-          transport: flow.transport,
-          duration_ms_b2: durationMsB2,
-          has_scope_hint: hasScopeHint,
-          has_resource_metadata_hint: hasResourceMetadataHint,
-          error_category: errorCategory,
-        },
-      });
-    }
-
     try {
       flow.resolveResult(result);
 
@@ -1236,35 +1151,6 @@ export class McpOauthService {
 
     flow.settled = true;
     clearTimeout(flow.timeout);
-
-    const durationMs = Math.max(0, Date.now() - flow.startedAtMs);
-    const durationMsB2 = roundToBase2(durationMs);
-    const hasScopeHint = Boolean(flow.scope);
-    const hasResourceMetadataHint = Boolean(flow.resourceMetadataUrl);
-
-    if (result.success) {
-      this.captureTelemetry({
-        event: "mcp_oauth_flow_completed",
-        properties: {
-          transport: flow.transport,
-          duration_ms_b2: durationMsB2,
-          has_scope_hint: hasScopeHint,
-          has_resource_metadata_hint: hasResourceMetadataHint,
-        },
-      });
-    } else {
-      const errorCategory = this.getOAuthFlowErrorCategory(result.error);
-      this.captureTelemetry({
-        event: "mcp_oauth_flow_failed",
-        properties: {
-          transport: flow.transport,
-          duration_ms_b2: durationMsB2,
-          has_scope_hint: hasScopeHint,
-          has_resource_metadata_hint: hasResourceMetadataHint,
-          error_category: errorCategory,
-        },
-      });
-    }
 
     try {
       flow.resolveResult(result);

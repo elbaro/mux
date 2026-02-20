@@ -254,7 +254,7 @@ export const PRStatusBadges: AppStory = {
               state: "OPEN",
               mergeable: "UNKNOWN",
               mergeStateStatus: "UNKNOWN",
-              title: "WIP: experimental feature",
+              title: "WIP: draft feature",
               isDraft: true,
               headRefName: "feature/work-in-progress",
               baseRefName: "main",

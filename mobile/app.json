@@ -8,9 +8,6 @@
     "platforms": ["ios", "android"],
     "newArchEnabled": true,
     "jsEngine": "hermes",
-    "experiments": {
-      "typedRoutes": true
-    },
     "extra": {
       "mux": {},
       "router": {},

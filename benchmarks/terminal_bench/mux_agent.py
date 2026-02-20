@@ -64,7 +64,6 @@ class MuxAgent(BaseInstalledAgent):
         "MUX_CONFIG_ROOT",
         "MUX_APP_ROOT",
         "MUX_WORKSPACE_ID",
-        "MUX_EXPERIMENTS",
         # Generic pass-through for arbitrary mux run CLI flags (e.g., --thinking
         # high --use-1m --budget 5.00). Avoids per-flag plumbing.
         "MUX_RUN_ARGS",
@@ -74,7 +73,6 @@ class MuxAgent(BaseInstalledAgent):
         self,
         logs_dir: Path,
         model_name: str = "anthropic:claude-sonnet-4-5",
-        experiments: str | None = None,
         timeout: int | str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -99,7 +97,6 @@ class MuxAgent(BaseInstalledAgent):
         self._repo_root = repo_root
         self._archive_bytes: bytes | None = None
         self._model_name = (model_name or "").strip()
-        self._experiments = (experiments or "").strip() if experiments else None
         self._last_environment: BaseEnvironment | None = None
 
     @staticmethod
@@ -156,10 +153,6 @@ class MuxAgent(BaseInstalledAgent):
         if project_path := env.get("MUX_PROJECT_PATH"):
             if not project_path.strip():
                 raise ValueError("MUX_PROJECT_PATH must be non-empty when provided")
-
-        # Set experiments from kwarg (takes precedence over env var)
-        if self._experiments:
-            env["MUX_EXPERIMENTS"] = self._experiments
 
         return env
 

@@ -34,7 +34,7 @@ function loadFromCache(wsId: string) {
  * Fetches lazily from the backend API and caches in localStorage.
  * This avoids the expensive runtime.stat calls during workspace.list().
  *
- * Always enabled: post-compaction context is a stable feature (not an experiment).
+ * Always enabled: post-compaction context is a stable feature (not a rollout).
  */
 export function usePostCompactionState(workspaceId: string): PostCompactionState {
   const { api } = useAPI();

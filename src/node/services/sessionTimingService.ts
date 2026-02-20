@@ -31,8 +31,6 @@ import type {
 } from "@/common/types/stream";
 import { createDeltaStorage, type DeltaRecordStorage } from "@/common/utils/tokens/tps";
 import { log } from "./log";
-import type { TelemetryService } from "./telemetryService";
-import { roundToBase2 } from "@/common/telemetry/utils";
 
 const SESSION_TIMING_FILE = "session-timing.json";
 const SESSION_TIMING_VERSION = 2 as const;
@@ -170,7 +168,6 @@ function validateTiming(params: {
  */
 export class SessionTimingService {
   private readonly config: Config;
-  private readonly telemetryService: TelemetryService;
   private readonly fileLocks = workspaceFileLocks;
 
   private readonly activeStreams = new Map<string, ActiveStreamState>();
@@ -195,9 +192,8 @@ export class SessionTimingService {
     override: "default",
   };
 
-  constructor(config: Config, telemetryService: TelemetryService) {
+  constructor(config: Config) {
     this.config = config;
-    this.telemetryService = telemetryService;
   }
 
   setStatsTabState(state: StatsTabState): void {
@@ -460,47 +456,6 @@ export class SessionTimingService {
           await this.writeTimingFile(workspaceId, current);
           this.timingFileCache.set(workspaceId, current);
         });
-
-        // Telemetry (only when feature enabled)
-        const durationSecs = Math.max(0, completed.totalDurationMs / 1000);
-
-        const toolPercentBucket =
-          completed.totalDurationMs > 0
-            ? Math.max(
-                0,
-                Math.min(
-                  100,
-                  Math.round(((completed.toolExecutionMs / completed.totalDurationMs) * 100) / 5) *
-                    5
-                )
-              )
-            : 0;
-
-        const telemetryAgentId = completed.agentId ?? completed.mode ?? "exec";
-
-        this.telemetryService.capture({
-          event: "stream_timing_computed",
-          properties: {
-            model: completed.model,
-            agentId: telemetryAgentId,
-            duration_b2: roundToBase2(durationSecs),
-            ttft_ms_b2: completed.ttftMs !== null ? roundToBase2(completed.ttftMs) : 0,
-            tool_ms_b2: roundToBase2(completed.toolExecutionMs),
-            streaming_ms_b2: roundToBase2(completed.streamingMs),
-            tool_percent_bucket: toolPercentBucket,
-            invalid: completed.invalid,
-          },
-        });
-
-        if (completed.invalid) {
-          const reason = completed.anomalies[0] ?? "unknown";
-          this.telemetryService.capture({
-            event: "stream_timing_invalid",
-            properties: {
-              reason,
-            },
-          });
-        }
       })
       .catch((error) => {
         log.warn(`Failed to persist session-timing.json for ${workspaceId}`, error);

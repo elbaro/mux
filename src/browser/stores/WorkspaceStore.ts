@@ -55,7 +55,6 @@ import {
   type LiveBashOutputInternal,
   type LiveBashOutputView,
 } from "@/browser/utils/messages/liveBashOutputBuffer";
-import { trackStreamCompleted } from "@/common/telemetry";
 
 export interface WorkspaceState {
   name: string; // User-facing workspace name (e.g., "feature-branch")
@@ -501,9 +500,6 @@ export class WorkspaceStore {
       const streamEndData = data as StreamEndEvent;
       applyWorkspaceChatEventToAggregator(aggregator, streamEndData);
 
-      // Track stream completion telemetry
-      this.trackStreamCompletedTelemetry(streamEndData, false);
-
       // Reset retry state on successful stream completion
       updatePersistedState(getRetryStateKey(workspaceId), createFreshRetryState());
 
@@ -536,21 +532,6 @@ export class WorkspaceStore {
     "stream-abort": (workspaceId, aggregator, data) => {
       const streamAbortData = data as StreamAbortEvent;
       applyWorkspaceChatEventToAggregator(aggregator, streamAbortData);
-
-      // Track stream interruption telemetry (get model from aggregator)
-      const model = aggregator.getCurrentModel();
-      if (model) {
-        this.trackStreamCompletedTelemetry(
-          {
-            metadata: {
-              model,
-              usage: streamAbortData.metadata?.usage,
-              duration: streamAbortData.metadata?.duration,
-            },
-          },
-          true
-        );
-      }
 
       // Flush any pending debounced bump before final bump to avoid double-bump
       this.cancelPendingIdleBump(workspaceId);
@@ -1087,27 +1068,6 @@ export class WorkspaceStore {
       }
       this.deltaIdleHandles.delete(workspaceId);
     }
-  }
-
-  /**
-   * Track stream completion telemetry
-   */
-  private trackStreamCompletedTelemetry(
-    data: {
-      metadata: {
-        model: string;
-        usage?: { outputTokens?: number };
-        duration?: number;
-      };
-    },
-    wasInterrupted: boolean
-  ): void {
-    const { metadata } = data;
-    const durationSecs = metadata.duration ? metadata.duration / 1000 : 0;
-    const outputTokens = metadata.usage?.outputTokens ?? 0;
-
-    // trackStreamCompleted handles rounding internally
-    trackStreamCompleted(metadata.model, wasInterrupted, durationSecs, outputTokens);
   }
 
   /**

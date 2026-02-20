@@ -6,7 +6,6 @@ import {
   Key,
   Cpu,
   X,
-  FlaskConical,
   Bot,
   Keyboard,
   Layout,
@@ -18,9 +17,7 @@ import {
 } from "lucide-react";
 import { useSettings } from "@/browser/contexts/SettingsContext";
 import { useOnboardingPause } from "@/browser/components/splashScreens/SplashScreenProvider";
-import { useExperimentValue } from "@/browser/hooks/useExperiments";
 import { isEditableElement, KEYBINDS, matchesKeybind } from "@/browser/utils/ui/keybinds";
-import { EXPERIMENT_IDS } from "@/common/constants/experiments";
 import { GeneralSection } from "./sections/GeneralSection";
 import { TasksSection } from "./sections/TasksSection";
 import { ProvidersSection } from "./sections/ProvidersSection";
@@ -31,7 +28,6 @@ import { Button } from "@/browser/components/ui/button";
 import { MCPSettingsSection } from "./sections/MCPSettingsSection";
 import { SecretsSection } from "./sections/SecretsSection";
 import { LayoutsSection } from "./sections/LayoutsSection";
-import { ExperimentsSection } from "./sections/ExperimentsSection";
 import { ServerAccessSection } from "./sections/ServerAccessSection";
 import { KeybindsSection } from "./sections/KeybindsSection";
 import type { SettingsSection } from "./types";
@@ -86,12 +82,6 @@ const BASE_SECTIONS: SettingsSection[] = [
     component: LayoutsSection,
   },
   {
-    id: "experiments",
-    label: "Experiments",
-    icon: <FlaskConical className="h-4 w-4" />,
-    component: ExperimentsSection,
-  },
-  {
     id: "keybinds",
     label: "Keybinds",
     icon: <Keyboard className="h-4 w-4" />,
@@ -107,18 +97,6 @@ interface SettingsPageProps {
 export function SettingsPage(props: SettingsPageProps) {
   const { close, activeSection, setActiveSection } = useSettings();
   const onboardingPause = useOnboardingPause();
-  const system1Enabled = useExperimentValue(EXPERIMENT_IDS.SYSTEM_1);
-  const governorEnabled = useExperimentValue(EXPERIMENT_IDS.MUX_GOVERNOR);
-
-  // Keep routing on a valid section when an experiment-gated section is disabled.
-  useEffect(() => {
-    if (!system1Enabled && activeSection === "system1") {
-      setActiveSection(BASE_SECTIONS[0]?.id ?? "general");
-    }
-    if (!governorEnabled && activeSection === "governor") {
-      setActiveSection(BASE_SECTIONS[0]?.id ?? "general");
-    }
-  }, [activeSection, setActiveSection, system1Enabled, governorEnabled]);
 
   // Close settings on Escape. Uses bubble phase so inner surfaces (Select dropdowns,
   // Popover, Dialog) that call stopPropagation/preventDefault on Escape get first
@@ -137,29 +115,22 @@ export function SettingsPage(props: SettingsPageProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [close]);
-  let sections: SettingsSection[] = BASE_SECTIONS;
-  if (system1Enabled) {
-    sections = [
-      ...sections,
-      {
-        id: "system1",
-        label: "System 1",
-        icon: <BrainCircuit className="h-4 w-4" />,
-        component: System1Section,
-      },
-    ];
-  }
-  if (governorEnabled) {
-    sections = [
-      ...sections,
-      {
-        id: "governor",
-        label: "Governor",
-        icon: <ShieldCheck className="h-4 w-4" />,
-        component: GovernorSection,
-      },
-    ];
-  }
+  // System 1 and Governor sections are always shown.
+  const sections: SettingsSection[] = [
+    ...BASE_SECTIONS,
+    {
+      id: "system1",
+      label: "System 1",
+      icon: <BrainCircuit className="h-4 w-4" />,
+      component: System1Section,
+    },
+    {
+      id: "governor",
+      label: "Governor",
+      icon: <ShieldCheck className="h-4 w-4" />,
+      component: GovernorSection,
+    },
+  ];
 
   const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0];
   const SectionComponent = currentSection.component;

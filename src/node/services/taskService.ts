@@ -79,12 +79,6 @@ export interface TaskCreateArgs {
   title: string;
   modelString?: string;
   thinkingLevel?: ThinkingLevel;
-  /** Experiments to inherit to subagent */
-  experiments?: {
-    programmaticToolCalling?: boolean;
-    programmaticToolCallingExclusive?: boolean;
-    execSubagentHardRestart?: boolean;
-  };
 }
 
 export interface TaskCreateResult {
@@ -585,14 +579,13 @@ export class TaskService {
               "When you have a final plan, call propose_plan exactly once."
           : "Mux restarted while this task was running. Continue where you left off. " +
               "When you have a final answer, call agent_report exactly once.",
-        {
-          model,
-          agentId: task.agentId ?? WORKSPACE_DEFAULTS.agentId,
-          thinkingLevel: task.taskThinkingLevel,
-          experiments: task.taskExperiments,
-        },
-        { synthetic: true }
-      );
+          {
+            model,
+            agentId: task.agentId ?? WORKSPACE_DEFAULTS.agentId,
+            thinkingLevel: task.taskThinkingLevel,
+          },
+          { synthetic: true }
+        );
     }
 
     // Restart-safety for git patch artifacts:
@@ -871,7 +864,6 @@ export class TaskService {
           taskTrunkBranch: trunkBranch,
           taskModelString,
           taskThinkingLevel: effectiveThinkingLevel,
-          taskExperiments: args.experiments,
         });
         return config;
       });
@@ -964,7 +956,6 @@ export class TaskService {
         taskBaseCommitSha: taskBaseCommitSha ?? undefined,
         taskModelString,
         taskThinkingLevel: effectiveThinkingLevel,
-        taskExperiments: args.experiments,
       });
       return config;
     });
@@ -993,7 +984,6 @@ export class TaskService {
       model: taskModelString,
       agentId,
       thinkingLevel: effectiveThinkingLevel,
-      experiments: args.experiments,
     });
     if (!sendResult.success) {
       const message =
@@ -2064,7 +2054,6 @@ export class TaskService {
             model,
             agentId: task.agentId ?? WORKSPACE_DEFAULTS.agentId,
             thinkingLevel: task.taskThinkingLevel,
-            experiments: task.taskExperiments,
           },
           { allowQueuedAgentTask: true }
         );
@@ -2087,7 +2076,6 @@ export class TaskService {
             model,
             agentId: task.agentId ?? WORKSPACE_DEFAULTS.agentId,
             thinkingLevel: task.taskThinkingLevel,
-            experiments: task.taskExperiments,
           },
           { allowQueuedAgentTask: true }
         );
@@ -2416,7 +2404,6 @@ export class TaskService {
             model: resolvedModel,
             agentId: targetAgentId,
             thinkingLevel: resolvedThinking,
-            experiments: args.entry.workspace.taskExperiments,
           },
           { synthetic: true }
         );

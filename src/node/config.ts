@@ -10,7 +10,6 @@ import type {
   Workspace,
   ProjectConfig,
   ProjectsConfig,
-  FeatureFlagOverride,
 } from "@/common/types/project";
 import {
   DEFAULT_TASK_SETTINGS,
@@ -171,7 +170,6 @@ export class Config {
           serverAuthGithubOwner?: unknown;
           defaultProjectDir?: unknown;
           viewedSplashScreens?: string[];
-          featureFlagOverrides?: Record<string, "default" | "on" | "off">;
           layoutPresets?: unknown;
           taskSettings?: unknown;
           muxGatewayEnabled?: unknown;
@@ -256,7 +254,6 @@ export class Config {
             agentAiDefaults,
             // Legacy fields are still parsed and returned for downgrade compatibility.
             subagentAiDefaults: legacySubagentAiDefaults,
-            featureFlagOverrides: parsed.featureFlagOverrides,
             useSSH2Transport: parseOptionalBoolean(parsed.useSSH2Transport),
             muxGovernorUrl: parseOptionalNonEmptyString(parsed.muxGovernorUrl),
             muxGovernorToken: parseOptionalNonEmptyString(parsed.muxGovernorToken),
@@ -296,7 +293,6 @@ export class Config {
         defaultProjectDir?: string;
         viewedSplashScreens?: string[];
         layoutPresets?: ProjectsConfig["layoutPresets"];
-        featureFlagOverrides?: ProjectsConfig["featureFlagOverrides"];
         taskSettings?: ProjectsConfig["taskSettings"];
         muxGatewayEnabled?: ProjectsConfig["muxGatewayEnabled"];
         muxGatewayModels?: ProjectsConfig["muxGatewayModels"];
@@ -377,9 +373,6 @@ export class Config {
       if (defaultProjectDir) {
         data.defaultProjectDir = defaultProjectDir;
       }
-      if (config.featureFlagOverrides) {
-        data.featureFlagOverrides = config.featureFlagOverrides;
-      }
       if (config.layoutPresets) {
         const normalized = normalizeLayoutPresetsConfig(config.layoutPresets);
         if (!isLayoutPresetsConfigEmpty(normalized)) {
@@ -445,32 +438,6 @@ export class Config {
     const config = this.loadConfigOrDefault();
     const newConfig = fn(config);
     await this.saveConfig(newConfig);
-  }
-
-  /**
-   * Cross-client feature flag overrides (shared via ~/.mux/config.json).
-   */
-  getFeatureFlagOverride(flagKey: string): FeatureFlagOverride {
-    const config = this.loadConfigOrDefault();
-    const override = config.featureFlagOverrides?.[flagKey];
-    if (override === "on" || override === "off" || override === "default") {
-      return override;
-    }
-    return "default";
-  }
-
-  async setFeatureFlagOverride(flagKey: string, override: FeatureFlagOverride): Promise<void> {
-    await this.editConfig((config) => {
-      const next = { ...(config.featureFlagOverrides ?? {}) };
-      if (override === "default") {
-        delete next[flagKey];
-      } else {
-        next[flagKey] = override;
-      }
-
-      config.featureFlagOverrides = Object.keys(next).length > 0 ? next : undefined;
-      return config;
-    });
   }
 
   /**
